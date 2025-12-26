@@ -30,6 +30,13 @@ export type { AgentEnvVar, CustomAgentSettings };
  */
 export type SendMessageShortcut = "enter" | "cmd-enter";
 
+export interface AcpBridgeSettings {
+	enabled: boolean;
+	host: string;
+	port: number;
+	token: string;
+}
+
 export interface AgentClientPluginSettings {
 	gemini: GeminiAgentSettings;
 	claude: ClaudeAgentSettings;
@@ -40,6 +47,10 @@ export interface AgentClientPluginSettings {
 	autoMentionActiveNote: boolean;
 	debugMode: boolean;
 	nodePath: string;
+	acpBridge: {
+		desktop: AcpBridgeSettings;
+		mobile: AcpBridgeSettings;
+	};
 	exportSettings: {
 		defaultFolder: string;
 		filenameTemplate: string;
@@ -88,6 +99,20 @@ const DEFAULT_SETTINGS: AgentClientPluginSettings = {
 	autoMentionActiveNote: true,
 	debugMode: false,
 	nodePath: "",
+	acpBridge: {
+		desktop: {
+			enabled: false,
+			host: "127.0.0.1",
+			port: 27123,
+			token: "",
+		},
+		mobile: {
+			enabled: false,
+			host: "127.0.0.1",
+			port: 27123,
+			token: "",
+		},
+	},
 	exportSettings: {
 		defaultFolder: "Agent Client",
 		filenameTemplate: "agent_client_{date}_{time}",
@@ -340,6 +365,45 @@ export default class AgentClientPlugin extends Plugin {
 			availableAgentIds.includes(rawActiveId) && rawActiveId.length > 0
 				? rawActiveId
 				: fallbackActiveId;
+		const resolveBridgeSettings = (
+			value: unknown,
+			fallback: AcpBridgeSettings,
+		): AcpBridgeSettings => {
+			const record =
+				value && typeof value === "object"
+					? (value as Record<string, unknown>)
+					: {};
+			const rawPort =
+				typeof record.port === "number"
+					? record.port
+					: typeof record.port === "string"
+						? Number.parseInt(record.port, 10)
+						: NaN;
+			return {
+				enabled:
+					typeof record.enabled === "boolean"
+						? record.enabled
+						: fallback.enabled,
+				host:
+					typeof record.host === "string" &&
+					record.host.trim().length > 0
+						? record.host.trim()
+						: fallback.host,
+				port:
+					Number.isFinite(rawPort) && rawPort > 0
+						? rawPort
+						: fallback.port,
+				token:
+					typeof record.token === "string"
+						? record.token
+						: fallback.token,
+			};
+		};
+		const rawBridge =
+			rawSettings.acpBridge &&
+			typeof rawSettings.acpBridge === "object"
+				? (rawSettings.acpBridge as Record<string, unknown>)
+				: {};
 
 		this.settings = {
 			claude: {
@@ -428,6 +492,16 @@ export default class AgentClientPlugin extends Plugin {
 				typeof rawSettings.nodePath === "string"
 					? rawSettings.nodePath.trim()
 					: DEFAULT_SETTINGS.nodePath,
+			acpBridge: {
+				desktop: resolveBridgeSettings(
+					rawBridge.desktop,
+					DEFAULT_SETTINGS.acpBridge.desktop,
+				),
+				mobile: resolveBridgeSettings(
+					rawBridge.mobile,
+					DEFAULT_SETTINGS.acpBridge.mobile,
+				),
+			},
 			exportSettings: (() => {
 				const rawExport = rawSettings.exportSettings as
 					| Record<string, unknown>
