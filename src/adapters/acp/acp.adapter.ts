@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from "child_process";
+import type { ChildProcess } from "child_process";
 import * as acp from "@agentclientprotocol/sdk";
 import { Platform } from "obsidian";
 
@@ -285,6 +285,12 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		const useBridge = bridgeSettings.enabled;
 		this.usingBridge = useBridge;
 
+		if (Platform.isMobileApp && !useBridge) {
+			throw new Error(
+				"ACP bridge is required on mobile. Enable ACP bridge in settings to connect.",
+			);
+		}
+
 		let command = "";
 		let args: string[] = [];
 
@@ -313,35 +319,6 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 			);
 		}
 
-		// Prepare environment variables
-		const baseEnv: NodeJS.ProcessEnv = {
-			...process.env,
-			...(config.env || {}),
-		};
-
-		// Add Node.js path to PATH if specified in settings
-		if (
-			this.plugin.settings.nodePath &&
-			this.plugin.settings.nodePath.trim().length > 0
-		) {
-			const nodeDir = resolveCommandDirectory(
-				this.plugin.settings.nodePath.trim(),
-			);
-			if (nodeDir) {
-				const separator = Platform.isWin ? ";" : ":";
-				baseEnv.PATH = baseEnv.PATH
-					? `${nodeDir}${separator}${baseEnv.PATH}`
-					: nodeDir;
-			}
-		}
-
-		if (!useBridge) {
-			this.logger.log(
-				"[AcpAdapter] Starting agent process in directory:",
-				config.workingDirectory,
-			);
-		}
-
 		if (useBridge) {
 			const url = this.buildBridgeUrl(bridgeSettings);
 			this.logger.log("[AcpAdapter] Connecting to ACP bridge:", url);
@@ -350,6 +327,35 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 
 			this.connection = new acp.ClientSideConnection(() => this, stream);
 		} else {
+			const { spawn } = require("child_process") as typeof import("child_process");
+
+			// Prepare environment variables
+			const baseEnv: NodeJS.ProcessEnv = {
+				...(Platform.isDesktopApp ? process.env : {}),
+				...(config.env || {}),
+			};
+
+			// Add Node.js path to PATH if specified in settings
+			if (
+				this.plugin.settings.nodePath &&
+				this.plugin.settings.nodePath.trim().length > 0
+			) {
+				const nodeDir = resolveCommandDirectory(
+					this.plugin.settings.nodePath.trim(),
+				);
+				if (nodeDir) {
+					const separator = Platform.isWin ? ";" : ":";
+					baseEnv.PATH = baseEnv.PATH
+						? `${nodeDir}${separator}${baseEnv.PATH}`
+						: nodeDir;
+				}
+			}
+
+			this.logger.log(
+				"[AcpAdapter] Starting agent process in directory:",
+				config.workingDirectory,
+			);
+
 			// Prepare command and args for spawning
 			let spawnCommand = command;
 			let spawnArgs = args;

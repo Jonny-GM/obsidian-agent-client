@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, SpawnOptions } from "child_process";
+import type { ChildProcess, SpawnOptions } from "child_process";
 import * as acp from "@agentclientprotocol/sdk";
 import type AgentClientPlugin from "../plugin";
 import { Logger } from "./logger";
@@ -35,6 +35,8 @@ export class TerminalManager {
 		if (!Platform.isDesktopApp) {
 			throw new Error("Agent Client is only available on desktop");
 		}
+
+		const { spawn } = require("child_process") as typeof import("child_process");
 
 		// Set up environment variables
 		// Desktop-only: Node.js process environment for terminal operations

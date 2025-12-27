@@ -53,13 +53,6 @@ function ChatComponent({
 	view: ChatView;
 }) {
 	// ============================================================
-	// Platform Check
-	// ============================================================
-	if (!Platform.isDesktopApp) {
-		throw new Error("Agent Client is only available on desktop");
-	}
-
-	// ============================================================
 	// Memoized Services & Adapters
 	// ============================================================
 	const logger = useMemo(() => new Logger(plugin), [plugin]);
@@ -67,7 +60,7 @@ function ChatComponent({
 	const vaultPath = useMemo(() => {
 		return (
 			(plugin.app.vault.adapter as VaultAdapterWithBasePath).basePath ||
-			process.cwd()
+			(Platform.isDesktopApp ? process.cwd() : "")
 		);
 	}, [plugin]);
 
@@ -94,6 +87,8 @@ function ChatComponent({
 	// Custom Hooks
 	// ============================================================
 	const settings = useSettings(plugin);
+	const requiresBridgeOnMobile =
+		Platform.isMobileApp && !settings.acpBridge.mobile.enabled;
 
 	const agentSession = useAgentSession(
 		acpAdapter,
@@ -291,9 +286,21 @@ function ChatComponent({
 	// ============================================================
 	// Initialize session on mount or when agent changes
 	useEffect(() => {
+		if (requiresBridgeOnMobile) {
+			return;
+		}
+
 		logger.log("[Debug] Starting connection setup via useAgentSession...");
 		void agentSession.createSession();
-	}, [session.agentId, agentSession.createSession]);
+	}, [session.agentId, agentSession.createSession, requiresBridgeOnMobile]);
+
+	useEffect(() => {
+		if (requiresBridgeOnMobile) {
+			new Notice(
+				"[Agent Client] ACP bridge is required on mobile. Enable it in settings.",
+			);
+		}
+	}, [requiresBridgeOnMobile]);
 
 	// Refs for cleanup (to access latest values in cleanup function)
 	const messagesRef = useRef(messages);
