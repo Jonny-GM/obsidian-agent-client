@@ -64,6 +64,11 @@ export class SettingsStore implements ISettingsAccess {
 	async updateSettings(
 		updates: Partial<AgentClientPluginSettings>,
 	): Promise<void> {
+		if (this.plugin.settings.debugMode) {
+			console.debug("[Agent Client] SettingsStore updateSettings", {
+				updates: Object.keys(updates),
+			});
+		}
 		const next = { ...this.state, ...updates };
 		this.state = next;
 

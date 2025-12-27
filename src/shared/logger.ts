@@ -36,7 +36,14 @@ export class Logger {
 		}
 	}
 
+	static async flush(): Promise<void> {
+		await Logger.logWriteQueue;
+	}
+
 	private queueFileWrite(level: string, args: unknown[]): void {
+		if (!this.plugin.settings.debugWriteToVaultLog) {
+			return;
+		}
 		const message = this.formatMessage(level, args);
 		Logger.logWriteQueue = Logger.logWriteQueue
 			.then(() => this.appendToLogFile(message))
