@@ -200,11 +200,15 @@ export default class AgentClientPlugin extends Plugin {
 	}
 
 	private async initializePlugin(): Promise<void> {
-		console.debug("[Agent Client] initializePlugin() start");
+		console.debug("[Agent Client] initializePlugin() start", {
+			instanceId: this.instanceId,
+			instanceNumber: this.instanceNumber,
+		});
 		let loadAttempt = 1;
 		try {
 			console.debug("[Agent Client] Loading settings (attempt 1)");
 			await this.loadSettings();
+			console.debug("[Agent Client] Settings loaded (attempt 1)");
 		} catch (error) {
 			console.error(
 				"[Agent Client] Failed to load settings. Retrying after layout ready.",
@@ -216,6 +220,7 @@ export default class AgentClientPlugin extends Plugin {
 			loadAttempt = 2;
 			console.debug("[Agent Client] Loading settings (attempt 2)");
 			await this.loadSettings();
+			console.debug("[Agent Client] Settings loaded (attempt 2)");
 		}
 
 		if (!this.settings.debugMode) {
@@ -254,6 +259,10 @@ export default class AgentClientPlugin extends Plugin {
 		this.logger.log(
 			`[Agent Client] Plugin initialized (settings load attempt: ${loadAttempt})`,
 		);
+		this.logger.log("[Agent Client] initializePlugin() continuing", {
+			instanceId: this.instanceId,
+			instanceNumber: this.instanceNumber,
+		});
 
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 		this.logger.log("[Agent Client] Registered chat view");
@@ -287,6 +296,19 @@ export default class AgentClientPlugin extends Plugin {
 
 		this.registerGlobalErrorHandlers();
 		this.logger.log("[Agent Client] Registered global error handlers");
+		this.registerEvent(
+			this.app.workspace.on("quit", () => {
+				this.logger?.log("[Agent Client] workspace quit event");
+			}),
+		);
+		this.app.workspace.onLayoutReady(() => {
+			this.logger?.log("[Agent Client] workspace layout ready");
+		});
+		this.registerEvent(
+			this.app.workspace.on("layout-change", () => {
+				this.logger?.log("[Agent Client] workspace layout change");
+			}),
+		);
 		console.debug("[Agent Client] initializePlugin() complete");
 	}
 
