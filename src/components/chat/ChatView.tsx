@@ -45,6 +45,47 @@ interface AppWithSettings {
 
 export const VIEW_TYPE_CHAT = "agent-client-chat-view";
 
+class ChatErrorBoundary extends React.Component<
+	{ plugin: AgentClientPlugin; children: React.ReactNode },
+	{ hasError: boolean; message: string }
+> {
+	private logger: Logger;
+
+	constructor(props: { plugin: AgentClientPlugin; children: React.ReactNode }) {
+		super(props);
+		this.state = { hasError: false, message: "" };
+		this.logger = new Logger(props.plugin);
+	}
+
+	static getDerivedStateFromError(error: Error) {
+		return { hasError: true, message: error.message };
+	}
+
+	componentDidCatch(error: Error, info: React.ErrorInfo) {
+		this.logger.error("[ChatView] Render error:", error, info);
+		new Notice(
+			"[Agent Client] Chat view failed to render. Please reopen the view.",
+		);
+	}
+
+	render() {
+		if (this.state.hasError) {
+			return (
+				<div className="agent-client-chat-view-container">
+					<p>
+						Agent Client encountered an error rendering this view.
+					</p>
+					{this.state.message ? (
+						<p>Details: {this.state.message}</p>
+					) : null}
+				</div>
+			);
+		}
+
+		return this.props.children;
+	}
+}
+
 function ChatComponent({
 	plugin,
 	view,
@@ -636,11 +677,15 @@ export class ChatView extends ItemView {
 	}
 
 	onOpen() {
-		const container = this.containerEl.children[1];
+		const container = this.contentEl ?? this.containerEl;
 		container.empty();
 
 		this.root = createRoot(container);
-		this.root.render(<ChatComponent plugin={this.plugin} view={this} />);
+		this.root.render(
+			<ChatErrorBoundary plugin={this.plugin}>
+				<ChatComponent plugin={this.plugin} view={this} />
+			</ChatErrorBoundary>,
+		);
 		return Promise.resolve();
 	}
 

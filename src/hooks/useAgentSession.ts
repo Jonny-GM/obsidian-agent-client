@@ -382,6 +382,13 @@ export function useAgentSession(
 		reconnectTargetRef.current = null;
 	}, []);
 
+	useEffect(() => {
+		return () => {
+			manualDisconnectRef.current = true;
+			clearReconnectTimers();
+		};
+	}, [clearReconnectTimers]);
+
 	const resetReconnectState = useCallback(() => {
 		clearReconnectTimers();
 		reconnectAttemptRef.current = 0;
