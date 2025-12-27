@@ -486,6 +486,17 @@ function ChatComponent({
 			});
 	}, [plugin]);
 
+	useEffect(() => {
+		if (!settings.debugMode || !sessionErrorInfo) {
+			return;
+		}
+		logger.error(
+			"[Agent Client][Debug] Session error:",
+			sessionErrorInfo.title,
+			sessionErrorInfo.message,
+		);
+	}, [logger, sessionErrorInfo, settings.debugMode]);
+
 	// ============================================================
 	// Effects - Auto-mention Active Note Tracking
 	// ============================================================
