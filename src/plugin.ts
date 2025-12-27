@@ -132,15 +132,22 @@ const DEFAULT_SETTINGS: AgentClientPluginSettings = {
 export default class AgentClientPlugin extends Plugin {
 	settings: AgentClientPluginSettings;
 	settingsStore!: SettingsStore;
+	private logger: Logger | null = null;
 
 	// Active ACP adapter instance (shared across use cases)
 	acpAdapter: import("./adapters/acp/acp.adapter").AcpAdapter | null = null;
 
 	async onload() {
+		console.debug("[Agent Client] onload() start");
 		try {
 			await this.initializePlugin();
+			this.logger?.log("[Agent Client] onload() complete");
 		} catch (error) {
 			console.error(
+				"[Agent Client] Failed to initialize plugin:",
+				error,
+			);
+			this.logger?.error(
 				"[Agent Client] Failed to initialize plugin:",
 				error,
 			);
@@ -150,10 +157,15 @@ export default class AgentClientPlugin extends Plugin {
 		}
 	}
 
-	onunload() {}
+	onunload() {
+		this.logger?.log("[Agent Client] onunload() invoked");
+	}
 
 	private async initializePlugin(): Promise<void> {
+		console.debug("[Agent Client] initializePlugin() start");
+		let loadAttempt = 1;
 		try {
+			console.debug("[Agent Client] Loading settings (attempt 1)");
 			await this.loadSettings();
 		} catch (error) {
 			console.error(
@@ -163,6 +175,8 @@ export default class AgentClientPlugin extends Plugin {
 			await new Promise<void>((resolve) => {
 				this.app.workspace.onLayoutReady(resolve);
 			});
+			loadAttempt = 2;
+			console.debug("[Agent Client] Loading settings (attempt 2)");
 			await this.loadSettings();
 		}
 
@@ -173,9 +187,13 @@ export default class AgentClientPlugin extends Plugin {
 
 		// Initialize settings store
 		this.settingsStore = createSettingsStore(this.settings, this);
-		new Logger(this).log("[Agent Client] Plugin initialized");
+		this.logger = new Logger(this);
+		this.logger.log(
+			`[Agent Client] Plugin initialized (settings load attempt: ${loadAttempt})`,
+		);
 
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
+		this.logger.log("[Agent Client] Registered chat view");
 
 		const ribbonIconEl = this.addRibbonIcon(
 			"bot-message-square",
@@ -185,6 +203,7 @@ export default class AgentClientPlugin extends Plugin {
 			},
 		);
 		ribbonIconEl.addClass("agent-client-ribbon-icon");
+		this.logger.log("[Agent Client] Added ribbon icon");
 
 		this.addCommand({
 			id: "open-chat-view",
@@ -193,12 +212,19 @@ export default class AgentClientPlugin extends Plugin {
 				void this.activateView();
 			},
 		});
+		this.logger.log("[Agent Client] Registered open chat command");
 
 		// Register agent-specific commands
 		this.registerAgentCommands();
 		this.registerPermissionCommands();
+		this.logger.log("[Agent Client] Registered agent and permission commands");
 
 		this.addSettingTab(new AgentClientSettingTab(this.app, this));
+		this.logger.log("[Agent Client] Added settings tab");
+
+		this.registerGlobalErrorHandlers();
+		this.logger.log("[Agent Client] Registered global error handlers");
+		console.debug("[Agent Client] initializePlugin() complete");
 	}
 
 	async activateView() {
@@ -338,6 +364,25 @@ export default class AgentClientPlugin extends Plugin {
 			callback: () => {
 				this.app.workspace.trigger("agent-client:cancel-message");
 			},
+		});
+	}
+
+	private registerGlobalErrorHandlers(): void {
+		this.registerDomEvent(window, "error", (event) => {
+			const errorEvent = event as ErrorEvent;
+			const errorInfo =
+				errorEvent.error instanceof Error
+					? errorEvent.error
+					: errorEvent.message;
+			this.logger?.error("[Agent Client] Window error:", errorInfo);
+		});
+
+		this.registerDomEvent(window, "unhandledrejection", (event) => {
+			const rejectionEvent = event as PromiseRejectionEvent;
+			this.logger?.error(
+				"[Agent Client] Unhandled rejection:",
+				rejectionEvent.reason,
+			);
 		});
 	}
 
