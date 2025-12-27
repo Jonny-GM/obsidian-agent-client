@@ -12,6 +12,7 @@ import {
 	normalizeCustomAgent,
 	ensureUniqueCustomAgentIds,
 } from "./shared/settings-utils";
+import { Logger } from "./shared/logger";
 import {
 	AgentEnvVar,
 	GeminiAgentSettings,
@@ -165,8 +166,14 @@ export default class AgentClientPlugin extends Plugin {
 			await this.loadSettings();
 		}
 
+		if (!this.settings.debugMode) {
+			this.settings.debugMode = true;
+			await this.saveSettings();
+		}
+
 		// Initialize settings store
 		this.settingsStore = createSettingsStore(this.settings, this);
+		new Logger(this).log("[Agent Client] Plugin initialized");
 
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 
