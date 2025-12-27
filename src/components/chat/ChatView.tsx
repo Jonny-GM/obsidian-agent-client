@@ -435,12 +435,16 @@ function ChatComponent({
 			logger.log("[ChatView] Cleanup: auto-export and close session");
 			// Use refs to get latest values (avoid stale closures)
 			void (async () => {
-				await autoExportRef.current.autoExportIfEnabled(
-					"closeChat",
-					messagesRef.current,
-					sessionRef.current,
-				);
-				await closeSessionRef.current();
+				try {
+					await autoExportRef.current.autoExportIfEnabled(
+						"closeChat",
+						messagesRef.current,
+						sessionRef.current,
+					);
+					await closeSessionRef.current();
+				} catch (error) {
+					logger.error("[ChatView] Cleanup failed:", error);
+				}
 			})();
 		};
 		// Empty dependency array - only run on unmount
