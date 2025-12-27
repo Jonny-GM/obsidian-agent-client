@@ -9,6 +9,7 @@ import type AgentClientPlugin from "../../plugin";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatInput } from "./ChatInput";
+import { ChatConnectionStatus } from "./ChatConnectionStatus";
 
 // Service imports
 import { NoteMentionService } from "../../adapters/obsidian/mention-service";
@@ -601,16 +602,18 @@ function ChatComponent({
 			<ChatHeader
 				agentLabel={activeAgentLabel}
 				isUpdateAvailable={isUpdateAvailable}
-				connectionStatusLabel={connectionStatus.connectionStatusLabel}
-				connectionStatusDetail={connectionStatus.connectionStatusDetail}
-				connectionStatusTone={connectionStatus.connectionStatusTone}
+				onNewChat={() => void handleNewChat()}
+				onExportChat={() => void handleExportChat()}
+				onOpenSettings={handleOpenSettings}
+			/>
+			<ChatConnectionStatus
+				statusLabel={connectionStatus.connectionStatusLabel}
+				statusDetail={connectionStatus.connectionStatusDetail}
+				statusTone={connectionStatus.connectionStatusTone}
 				showReconnectAction={connectionStatus.showReconnectAction}
 				showCancelReconnectAction={
 					connectionStatus.showCancelReconnectAction
 				}
-				onNewChat={() => void handleNewChat()}
-				onExportChat={() => void handleExportChat()}
-				onOpenSettings={handleOpenSettings}
 				onReconnect={() => void reconnectNow()}
 				onCancelReconnect={cancelReconnect}
 			/>
