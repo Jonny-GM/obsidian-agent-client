@@ -1155,6 +1155,10 @@ If your plugin does not need CSS, delete this file.
 	color: var(--color-red);
 }
 
+.agent-client-diff-line-context .agent-client-diff-line-marker {
+	color: var(--text-muted);
+}
+
 /* Tool Call Details */
 .agent-client-tool-call-read-details,
 .agent-client-tool-call-edit-details,
