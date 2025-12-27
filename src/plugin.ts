@@ -381,14 +381,33 @@ export default class AgentClientPlugin extends Plugin {
 				errorEvent.error instanceof Error
 					? errorEvent.error
 					: errorEvent.message;
-			this.logger?.error("[Agent Client] Window error:", errorInfo);
+			this.logger?.error("[Agent Client] Window error:", {
+				message: errorEvent.message,
+				filename: errorEvent.filename,
+				lineno: errorEvent.lineno,
+				colno: errorEvent.colno,
+				error:
+					errorEvent.error instanceof Error
+						? {
+								name: errorEvent.error.name,
+								message: errorEvent.error.message,
+								stack: errorEvent.error.stack,
+							}
+						: errorInfo,
+			});
 		});
 
 		this.registerDomEvent(window, "unhandledrejection", (event) => {
 			const rejectionEvent = event as PromiseRejectionEvent;
 			this.logger?.error(
 				"[Agent Client] Unhandled rejection:",
-				rejectionEvent.reason,
+				rejectionEvent.reason instanceof Error
+					? {
+							name: rejectionEvent.reason.name,
+							message: rejectionEvent.reason.message,
+							stack: rejectionEvent.reason.stack,
+						}
+					: rejectionEvent.reason,
 			);
 		});
 	}

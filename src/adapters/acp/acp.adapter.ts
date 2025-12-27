@@ -208,7 +208,12 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		const agentLabel = `${config.displayName} (${config.id})`;
 
 		const openPromise = new Promise<void>((resolve, reject) => {
-			socket.addEventListener("open", () => resolve());
+			socket.addEventListener("open", () => {
+				this.logger.log(
+					`[AcpAdapter] ACP bridge socket opened for ${agentLabel}`,
+				);
+				resolve();
+			});
 			socket.addEventListener("error", () =>
 				reject(new Error("ACP bridge connection error")),
 			);

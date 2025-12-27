@@ -472,6 +472,7 @@ function ChatComponent({
 						sessionRef.current,
 					);
 					await closeSessionRef.current();
+					logger.log("[ChatView] Cleanup complete");
 				} catch (error) {
 					logger.error("[ChatView] Cleanup failed:", error);
 				}
