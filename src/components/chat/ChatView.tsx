@@ -334,7 +334,8 @@ function ChatComponent({
 				vaultBasePath:
 					(plugin.app.vault.adapter as VaultAdapterWithBasePath)
 						.basePath || "",
-				isAutoMentionDisabled: autoMention.isDisabled,
+				isAutoMentionDisabled:
+					autoMention.isDisabled || !settings.autoMentionActiveNote,
 				images,
 			});
 		},
