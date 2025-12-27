@@ -1,6 +1,6 @@
 import { Plugin, WorkspaceLeaf, Notice, requestUrl } from "obsidian";
 import * as semver from "semver";
-import { ChatView, VIEW_TYPE_CHAT } from "./components/chat/ChatView";
+import { VIEW_TYPE_CHAT } from "./components/chat/chat-view-type";
 import {
 	createSettingsStore,
 	type SettingsStore,
@@ -100,6 +100,7 @@ export default class AgentClientPlugin extends Plugin {
 		// Initialize settings store
 		this.settingsStore = createSettingsStore(this.settings, this);
 
+		const { ChatView } = await import("./components/chat/ChatView");
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 
 		const ribbonIconEl = this.addRibbonIcon(

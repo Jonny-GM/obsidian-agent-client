@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Platform, Notice } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice } from "obsidian";
 import * as React from "react";
 const { useState, useRef, useEffect, useMemo, useCallback } = React;
 import { createRoot, Root } from "react-dom/client";
@@ -30,6 +30,7 @@ import { useAgentSession } from "../../hooks/useAgentSession";
 import { useChat } from "../../hooks/useChat";
 import { usePermission } from "../../hooks/usePermission";
 import { useAutoExport } from "../../hooks/useAutoExport";
+import { VIEW_TYPE_CHAT } from "./chat-view-type";
 
 // Type definitions for Obsidian internal APIs
 interface VaultAdapterWithBasePath {
@@ -43,8 +44,6 @@ interface AppWithSettings {
 	};
 }
 
-export const VIEW_TYPE_CHAT = "agent-client-chat-view";
-
 function ChatComponent({
 	plugin,
 	view,
@@ -52,13 +51,6 @@ function ChatComponent({
 	plugin: AgentClientPlugin;
 	view: ChatView;
 }) {
-	// ============================================================
-	// Platform Check
-	// ============================================================
-	if (!Platform.isDesktopApp) {
-		throw new Error("Agent Client is only available on desktop");
-	}
-
 	// ============================================================
 	// Memoized Services & Adapters
 	// ============================================================
