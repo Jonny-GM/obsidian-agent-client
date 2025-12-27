@@ -116,6 +116,8 @@ function ChatComponent({
 	);
 
 	const { messages, isSending } = chat;
+	const chatRef = useRef(chat);
+	chatRef.current = chat;
 
 	const permission = usePermission(acpAdapter, messages);
 
@@ -137,6 +139,9 @@ function ChatComponent({
 	// ============================================================
 	const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
 	const [restoredMessage, setRestoredMessage] = useState<string | null>(null);
+	const pendingSessionResolver = useRef<
+		((sessionId: string | null) => void) | null
+	>(null);
 
 	// ============================================================
 	// Computed Values
@@ -163,6 +168,9 @@ function ChatComponent({
 		);
 		return custom?.displayName || custom?.id || activeId;
 	}, [session.agentId, plugin.settings]);
+
+	const canStartSessionOnMobile =
+		Platform.isMobileApp && !requiresBridgeOnMobile;
 
 	// ============================================================
 	// Callbacks
@@ -250,7 +258,35 @@ function ChatComponent({
 			content: string,
 			images?: import("../../domain/models/prompt-content").ImagePromptContent[],
 		) => {
-			await chat.sendMessage(content, {
+			const waitForSessionReady = (): Promise<string | null> => {
+				if (session.sessionId) {
+					return Promise.resolve(session.sessionId);
+				}
+				return new Promise((resolve) => {
+					pendingSessionResolver.current = resolve;
+				});
+			};
+
+			const ensureSessionReady = async (): Promise<boolean> => {
+				if (session.sessionId) {
+					return true;
+				}
+				if (!canStartSessionOnMobile) {
+					return false;
+				}
+				if (session.state === "initializing") {
+					return (await waitForSessionReady()) !== null;
+				}
+				await agentSession.createSession();
+				return (await waitForSessionReady()) !== null;
+			};
+
+			const ready = await ensureSessionReady();
+			if (!ready) {
+				return;
+			}
+
+			await chatRef.current.sendMessage(content, {
 				activeNote: autoMention.activeNote,
 				vaultBasePath:
 					(plugin.app.vault.adapter as VaultAdapterWithBasePath)
@@ -259,7 +295,14 @@ function ChatComponent({
 				images,
 			});
 		},
-		[chat, autoMention, plugin],
+		[
+			agentSession,
+			autoMention,
+			canStartSessionOnMobile,
+			plugin,
+			session.sessionId,
+			session.state,
+		],
 	);
 
 	const handleStopGeneration = useCallback(async () => {
@@ -286,13 +329,28 @@ function ChatComponent({
 	// ============================================================
 	// Initialize session on mount or when agent changes
 	useEffect(() => {
-		if (requiresBridgeOnMobile) {
+		if (requiresBridgeOnMobile || Platform.isMobileApp) {
 			return;
 		}
 
 		logger.log("[Debug] Starting connection setup via useAgentSession...");
 		void agentSession.createSession();
 	}, [session.agentId, agentSession.createSession, requiresBridgeOnMobile]);
+
+	useEffect(() => {
+		if (!pendingSessionResolver.current) {
+			return;
+		}
+		if (session.sessionId) {
+			pendingSessionResolver.current(session.sessionId);
+			pendingSessionResolver.current = null;
+			return;
+		}
+		if (session.state === "error") {
+			pendingSessionResolver.current(null);
+			pendingSessionResolver.current = null;
+		}
+	}, [session.sessionId, session.state]);
 
 	useEffect(() => {
 		if (requiresBridgeOnMobile) {
@@ -523,6 +581,7 @@ function ChatComponent({
 			<ChatInput
 				isSending={isSending}
 				isSessionReady={isSessionReady}
+				canStartSession={canStartSessionOnMobile}
 				agentLabel={activeAgentLabel}
 				availableCommands={session.availableCommands || []}
 				autoMentionEnabled={settings.autoMentionActiveNote}
