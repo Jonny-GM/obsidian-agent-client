@@ -14,10 +14,12 @@ import type {
 import { NoteMentionService } from "./mention-service";
 import type AgentClientPlugin from "../../plugin";
 import {
-	TFile,
 	MarkdownView,
-	type EventRef,
+	TAbstractFile,
+	TFile,
+	TFolder,
 	type EditorSelection,
+	type EventRef,
 } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { Compartment, StateEffect } from "@codemirror/state";
@@ -331,7 +333,15 @@ export class ObsidianVaultAdapter implements IVaultAccess {
 	 * @param file - Obsidian TFile object
 	 * @returns NoteMetadata object
 	 */
-	private convertToMetadata(file: TFile): NoteMetadata {
+	private convertToMetadata(file: TAbstractFile): NoteMetadata {
+		if (file instanceof TFile) {
+			return this.convertFileToMetadata(file);
+		}
+
+		return this.convertFolderToMetadata(file as TFolder);
+	}
+
+	private convertFileToMetadata(file: TFile): NoteMetadata {
 		const cache = this.plugin.app.metadataCache.getFileCache(file);
 		const aliases = cache?.frontmatter?.aliases as
 			| string[]
@@ -339,6 +349,7 @@ export class ObsidianVaultAdapter implements IVaultAccess {
 			| undefined;
 
 		return {
+			kind: "file",
 			path: file.path,
 			name: file.basename,
 			extension: file.extension,
@@ -349,6 +360,19 @@ export class ObsidianVaultAdapter implements IVaultAccess {
 				: aliases
 					? [aliases]
 					: undefined,
+		};
+	}
+
+	private convertFolderToMetadata(folder: TFolder): NoteMetadata {
+		const stat = "stat" in folder ? folder.stat : undefined;
+
+		return {
+			kind: "folder",
+			path: folder.path,
+			name: folder.name,
+			extension: "",
+			created: stat?.ctime ?? 0,
+			modified: stat?.mtime ?? 0,
 		};
 	}
 }

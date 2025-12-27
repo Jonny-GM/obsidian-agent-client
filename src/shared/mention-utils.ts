@@ -97,13 +97,13 @@ export function detectMention(
 export function replaceMention(
 	text: string,
 	mentionContext: MentionContext,
-	noteTitle: string,
+	mentionText: string,
 ): { newText: string; newCursorPos: number } {
 	const before = text.slice(0, mentionContext.start);
 	const after = text.slice(mentionContext.end);
 
 	// Always use @[[filename]] format
-	const replacement = ` @[[${noteTitle}]] `;
+	const replacement = ` @[[${mentionText}]] `;
 
 	const newText = before + replacement + after;
 	const newCursorPos = mentionContext.start + replacement.length;
@@ -131,7 +131,9 @@ export function extractMentionedNotes(
 		// Find the file by basename
 		const file = noteMentionService
 			.getAllFiles()
-			.find((f: TFile) => f.basename === noteTitle);
+			.find(
+				(f: TFile) => f.basename === noteTitle || f.path === noteTitle,
+			);
 
 		result.push({ noteTitle, file });
 	}

@@ -102,6 +102,8 @@ export function SuggestionDropdown({
 
 		if (type === "mention") {
 			const note = item as NoteMetadata;
+			const displayName =
+				note.kind === "folder" ? `${note.name}/` : note.name;
 			return (
 				<div
 					key={note.path}
@@ -112,7 +114,7 @@ export function SuggestionDropdown({
 					}}
 				>
 					<div className="agent-client-mention-dropdown-item-name">
-						{note.name}
+						{displayName}
 					</div>
 					<div className="agent-client-mention-dropdown-item-path">
 						{note.path}
