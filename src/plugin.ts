@@ -136,7 +136,34 @@ export default class AgentClientPlugin extends Plugin {
 	acpAdapter: import("./adapters/acp/acp.adapter").AcpAdapter | null = null;
 
 	async onload() {
-		await this.loadSettings();
+		try {
+			await this.initializePlugin();
+		} catch (error) {
+			console.error(
+				"[Agent Client] Failed to initialize plugin:",
+				error,
+			);
+			new Notice(
+				"[Agent Client] Failed to initialize. Check the console for details.",
+			);
+		}
+	}
+
+	onunload() {}
+
+	private async initializePlugin(): Promise<void> {
+		try {
+			await this.loadSettings();
+		} catch (error) {
+			console.error(
+				"[Agent Client] Failed to load settings. Retrying after layout ready.",
+				error,
+			);
+			await new Promise<void>((resolve) => {
+				this.app.workspace.onLayoutReady(resolve);
+			});
+			await this.loadSettings();
+		}
 
 		// Initialize settings store
 		this.settingsStore = createSettingsStore(this.settings, this);
@@ -166,8 +193,6 @@ export default class AgentClientPlugin extends Plugin {
 
 		this.addSettingTab(new AgentClientSettingTab(this.app, this));
 	}
-
-	onunload() {}
 
 	async activateView() {
 		const { workspace } = this.app;
