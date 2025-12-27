@@ -67,6 +67,7 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 	private connection: acp.ClientSideConnection | null = null;
 	private agentProcess: ChildProcess | null = null;
 	private bridgeSocket: WebSocket | null = null;
+	private bridgeHealthInterval: ReturnType<typeof setInterval> | null = null;
 	private usingBridge = false;
 	private logger: Logger;
 
@@ -130,6 +131,70 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		return url.toString();
 	}
 
+	private clearBridgeHealthCheck(): void {
+		if (this.bridgeHealthInterval) {
+			clearInterval(this.bridgeHealthInterval);
+			this.bridgeHealthInterval = null;
+		}
+	}
+
+	private handleBridgeDisconnect(
+		title: string,
+		message: string,
+		agentId?: string,
+	): void {
+		const shouldReport = this.usingBridge && this.isInitializedFlag;
+		if (this.bridgeSocket) {
+			this.bridgeSocket.close();
+			this.bridgeSocket = null;
+		}
+
+		this.clearBridgeHealthCheck();
+
+		if (this.connection) {
+			this.connection = null;
+		}
+
+		this.isInitializedFlag = false;
+		this.currentAgentId = null;
+
+		if (!shouldReport) {
+			return;
+		}
+
+		const agentError: AgentError = {
+			id: crypto.randomUUID(),
+			category: "connection",
+			severity: "error",
+			title,
+			message,
+			occurredAt: new Date(),
+			agentId,
+		};
+		this.errorCallback?.(agentError);
+	}
+
+	private startBridgeHealthCheck(
+		socket: WebSocket,
+		agentLabel: string,
+		agentId: string,
+	): void {
+		this.clearBridgeHealthCheck();
+		this.bridgeHealthInterval = setInterval(() => {
+			if (socket.readyState === WebSocket.OPEN) {
+				return;
+			}
+			if (socket.readyState === WebSocket.CONNECTING) {
+				return;
+			}
+			this.handleBridgeDisconnect(
+				"ACP bridge connection closed",
+				`The ACP bridge connection closed for ${agentLabel}.`,
+				agentId,
+			);
+		}, 3000);
+	}
+
 	private createBridgeStream(
 		url: string,
 		config: AgentConfig,
@@ -167,33 +232,19 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 					}
 				};
 				const handleClose = () => {
-					if (this.usingBridge && this.isInitializedFlag) {
-						const agentError: AgentError = {
-							id: crypto.randomUUID(),
-							category: "connection",
-							severity: "error",
-							title: "ACP bridge connection closed",
-							message: `The ACP bridge connection closed for ${agentLabel}.`,
-							occurredAt: new Date(),
-							agentId: config.id,
-						};
-						this.errorCallback?.(agentError);
-					}
+					this.handleBridgeDisconnect(
+						"ACP bridge connection closed",
+						`The ACP bridge connection closed for ${agentLabel}.`,
+						config.id,
+					);
 					controller.close();
 				};
 				const handleError = () => {
-					if (this.usingBridge && this.isInitializedFlag) {
-						const agentError: AgentError = {
-							id: crypto.randomUUID(),
-							category: "connection",
-							severity: "error",
-							title: "ACP bridge connection error",
-							message: `Failed to communicate with ACP bridge for ${agentLabel}.`,
-							occurredAt: new Date(),
-							agentId: config.id,
-						};
-						this.errorCallback?.(agentError);
-					}
+					this.handleBridgeDisconnect(
+						"ACP bridge connection error",
+						`Failed to communicate with ACP bridge for ${agentLabel}.`,
+						config.id,
+					);
 					controller.error(
 						new Error("ACP bridge connection error"),
 					);
@@ -202,6 +253,7 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 				socket.addEventListener("message", handleMessage);
 				socket.addEventListener("close", handleClose);
 				socket.addEventListener("error", handleError);
+				this.startBridgeHealthCheck(socket, agentLabel, config.id);
 			},
 			cancel: () => {
 				socket.close();
@@ -268,6 +320,7 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 			this.bridgeSocket.close();
 			this.bridgeSocket = null;
 		}
+		this.clearBridgeHealthCheck();
 
 		// Clean up existing connection
 		if (this.connection) {
@@ -843,6 +896,7 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 			this.bridgeSocket.close();
 			this.bridgeSocket = null;
 		}
+		this.clearBridgeHealthCheck();
 
 		// Clear connection and config references
 		this.connection = null;
