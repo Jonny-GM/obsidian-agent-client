@@ -364,7 +364,9 @@ export class ObsidianVaultAdapter implements IVaultAccess {
 	}
 
 	private convertFolderToMetadata(folder: TFolder): NoteMetadata {
-		const stat = "stat" in folder ? folder.stat : undefined;
+		const stat = (folder as TFolder & {
+			stat?: { ctime: number; mtime: number };
+		}).stat;
 
 		return {
 			kind: "folder",
