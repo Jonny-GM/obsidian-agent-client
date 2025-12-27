@@ -589,6 +589,27 @@ export function useAgentSession(
 	}, [resetReconnectState]);
 
 	useEffect(() => {
+		if (!isBridgeEnabled) {
+			return;
+		}
+		if (manualDisconnectRef.current) {
+			return;
+		}
+		if (session.state !== "disconnected") {
+			return;
+		}
+		if (reconnectStatus.state !== "idle") {
+			return;
+		}
+		void reconnectNow();
+	}, [
+		isBridgeEnabled,
+		reconnectNow,
+		reconnectStatus.state,
+		session.state,
+	]);
+
+	useEffect(() => {
 		const unsubscribe = settingsAccess.subscribe(() => {
 			setIsBridgeEnabled(getBridgeEnabledFromSettings());
 		});

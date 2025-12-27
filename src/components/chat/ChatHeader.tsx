@@ -53,6 +53,9 @@ export function ChatHeader({
 	onCancelReconnect,
 }: ChatHeaderProps) {
 	const statusTone = (() => {
+		if (isBridgeEnabled && reconnectStatus.state === "connecting") {
+			return "info";
+		}
 		if (
 			isBridgeEnabled &&
 			canStartSession &&
@@ -73,6 +76,9 @@ export function ChatHeader({
 	})();
 
 	const statusLabel = (() => {
+		if (isBridgeEnabled && reconnectStatus.state === "connecting") {
+			return "Bridge Connecting";
+		}
 		const baseLabel = (() => {
 			switch (sessionState) {
 				case "ready":
