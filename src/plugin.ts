@@ -195,6 +195,31 @@ export default class AgentClientPlugin extends Plugin {
 		// Initialize settings store
 		this.settingsStore = createSettingsStore(this.settings, this);
 		this.logger = new Logger(this);
+		this.logger.log("[Agent Client] Settings snapshot:", {
+			manifestVersion: this.manifest.version,
+			activeAgentId: this.settings.activeAgentId,
+			debugMode: this.settings.debugMode,
+			autoAllowPermissions: this.settings.autoAllowPermissions,
+			autoMentionActiveNote: this.settings.autoMentionActiveNote,
+			nodePathConfigured:
+				this.settings.nodePath && this.settings.nodePath.trim().length > 0,
+			acpBridge: {
+				mobile: {
+					enabled: this.settings.acpBridge.mobile.enabled,
+					host: this.settings.acpBridge.mobile.host,
+					port: this.settings.acpBridge.mobile.port,
+					tokenConfigured:
+						this.settings.acpBridge.mobile.token.trim().length > 0,
+				},
+				desktop: {
+					enabled: this.settings.acpBridge.desktop.enabled,
+					host: this.settings.acpBridge.desktop.host,
+					port: this.settings.acpBridge.desktop.port,
+					tokenConfigured:
+						this.settings.acpBridge.desktop.token.trim().length > 0,
+				},
+			},
+		});
 		this.logger.log(
 			`[Agent Client] Plugin initialized (settings load attempt: ${loadAttempt})`,
 		);

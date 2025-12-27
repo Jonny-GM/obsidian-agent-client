@@ -144,6 +144,13 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		agentId?: string,
 	): void {
 		const shouldReport = this.usingBridge && this.isInitializedFlag;
+		this.logger.log("[AcpAdapter] Bridge disconnect detected:", {
+			title,
+			message,
+			agentId,
+			shouldReport,
+			readyState: this.bridgeSocket?.readyState,
+		});
 		if (this.bridgeSocket) {
 			this.bridgeSocket.close();
 			this.bridgeSocket = null;
