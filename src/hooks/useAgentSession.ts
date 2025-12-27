@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { Platform } from "obsidian";
 import type {
 	ChatSession,
 	SessionState,
@@ -40,6 +41,14 @@ export interface SessionErrorInfo {
 	suggestion?: string;
 }
 
+export interface ReconnectStatus {
+	state: "idle" | "scheduled" | "reconnecting";
+	attempt: number;
+	nextAttemptAt?: Date;
+	secondsRemaining?: number;
+	reason?: string;
+}
+
 /**
  * Return type for useAgentSession hook.
  */
@@ -50,6 +59,12 @@ export interface UseAgentSessionReturn {
 	isReady: boolean;
 	/** Error information if session operation failed */
 	errorInfo: SessionErrorInfo | null;
+
+	/** Status of automatic reconnect attempts */
+	reconnectStatus: ReconnectStatus;
+
+	/** Whether the ACP bridge is enabled for this platform */
+	isBridgeEnabled: boolean;
 
 	/**
 	 * Create a new session with the current active agent.
@@ -68,6 +83,16 @@ export interface UseAgentSessionReturn {
 	 * Cancels any running operation and kills the agent process.
 	 */
 	closeSession: () => Promise<void>;
+
+	/**
+	 * Manually trigger a reconnect attempt.
+	 */
+	reconnectNow: () => Promise<void>;
+
+	/**
+	 * Cancel any scheduled auto-reconnect attempt.
+	 */
+	cancelReconnect: () => void;
 
 	/**
 	 * Cancel the current agent operation.
@@ -302,15 +327,56 @@ export function useAgentSession(
 
 	// Error state
 	const [errorInfo, setErrorInfo] = useState<SessionErrorInfo | null>(null);
+	const [reconnectStatus, setReconnectStatus] =
+		useState<ReconnectStatus>({
+			state: "idle",
+			attempt: 0,
+		});
+	const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+		null,
+	);
+	const reconnectAttemptRef = useRef(0);
+	const reconnectInProgressRef = useRef(false);
+	const manualDisconnectRef = useRef(false);
+	const reconnectIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+		null,
+	);
 
 	// Derived state
 	const isReady = session.state === "ready";
+
+	const isBridgeEnabled = useCallback((): boolean => {
+		const settings = settingsAccess.getSnapshot();
+		const bridgeSettings = Platform.isMobileApp
+			? settings.acpBridge.mobile
+			: settings.acpBridge.desktop;
+		return bridgeSettings.enabled;
+	}, [settingsAccess]);
+
+	const clearReconnectTimer = useCallback(() => {
+		if (reconnectTimeoutRef.current) {
+			clearTimeout(reconnectTimeoutRef.current);
+			reconnectTimeoutRef.current = null;
+		}
+	}, []);
+
+	const clearReconnectInterval = useCallback(() => {
+		if (reconnectIntervalRef.current) {
+			clearInterval(reconnectIntervalRef.current);
+			reconnectIntervalRef.current = null;
+		}
+	}, []);
 
 	/**
 	 * Create a new session with the active agent.
 	 * (Inlined from ManageSessionUseCase.createSession)
 	 */
 	const createSession = useCallback(async () => {
+		manualDisconnectRef.current = false;
+		clearReconnectTimer();
+		reconnectInProgressRef.current = false;
+		clearReconnectInterval();
+
 		// Get current settings and agent info
 		const settings = settingsAccess.getSnapshot();
 		const activeAgentId = getActiveAgentId(settings);
@@ -399,7 +465,13 @@ export function useAgentSession(
 					: prev.promptCapabilities,
 				lastActivityAt: new Date(),
 			}));
+			reconnectAttemptRef.current = 0;
+			setReconnectStatus({
+				state: "idle",
+				attempt: 0,
+			});
 		} catch (error) {
+			reconnectInProgressRef.current = false;
 			// Error - update to error state
 			setSession((prev) => ({ ...prev, state: "error" }));
 			setErrorInfo({
@@ -408,8 +480,76 @@ export function useAgentSession(
 				suggestion:
 					"Please check the agent configuration and try again.",
 			});
+			scheduleReconnect("session creation failed");
 		}
-	}, [agentClient, settingsAccess, workingDirectory]);
+	}, [
+		agentClient,
+		clearReconnectInterval,
+		clearReconnectTimer,
+		settingsAccess,
+		workingDirectory,
+	]);
+
+	const scheduleReconnect = useCallback(
+		(reason: string) => {
+			if (!isBridgeEnabled()) {
+				return;
+			}
+			if (manualDisconnectRef.current) {
+				return;
+			}
+			if (reconnectTimeoutRef.current || reconnectInProgressRef.current) {
+				return;
+			}
+			reconnectAttemptRef.current += 1;
+			const attempt = reconnectAttemptRef.current;
+			const delay = Math.min(30000, 1000 * 2 ** (attempt - 1));
+			const nextAttemptAt = new Date(Date.now() + delay);
+			console.warn(
+				`Scheduling ACP bridge reconnect attempt ${attempt} in ${delay}ms (${reason})`,
+			);
+			setReconnectStatus({
+				state: "scheduled",
+				attempt,
+				nextAttemptAt,
+				secondsRemaining: Math.ceil(delay / 1000),
+				reason,
+			});
+			clearReconnectInterval();
+			reconnectIntervalRef.current = setInterval(() => {
+				const remainingMs =
+					nextAttemptAt.getTime() - Date.now();
+				const secondsRemaining = Math.max(
+					0,
+					Math.ceil(remainingMs / 1000),
+				);
+				setReconnectStatus((prev) =>
+					prev.state === "scheduled"
+						? {
+								...prev,
+								secondsRemaining,
+						  }
+						: prev,
+				);
+				if (remainingMs <= 0) {
+					clearReconnectInterval();
+				}
+			}, 1000);
+			reconnectTimeoutRef.current = setTimeout(() => {
+				reconnectTimeoutRef.current = null;
+				reconnectInProgressRef.current = true;
+				setReconnectStatus((prev) => ({
+					state: "reconnecting",
+					attempt: prev.attempt || attempt,
+					reason: prev.reason || reason,
+				}));
+				void createSession().finally(() => {
+					reconnectInProgressRef.current = false;
+				});
+			}, delay);
+		},
+		[createSession, isBridgeEnabled, clearReconnectInterval],
+	);
 
 	/**
 	 * Restart the current session.
@@ -423,6 +563,15 @@ export function useAgentSession(
 	 * Cancels any running operation and kills the agent process.
 	 */
 	const closeSession = useCallback(async () => {
+		manualDisconnectRef.current = true;
+		clearReconnectTimer();
+		clearReconnectInterval();
+		reconnectAttemptRef.current = 0;
+		setReconnectStatus({
+			state: "idle",
+			attempt: 0,
+		});
+
 		// Cancel current session if active
 		if (session.sessionId) {
 			try {
@@ -446,7 +595,34 @@ export function useAgentSession(
 			sessionId: null,
 			state: "disconnected",
 		}));
-	}, [agentClient, session.sessionId]);
+	}, [
+		agentClient,
+		clearReconnectInterval,
+		clearReconnectTimer,
+		session.sessionId,
+	]);
+
+	const reconnectNow = useCallback(async () => {
+		manualDisconnectRef.current = false;
+		clearReconnectTimer();
+		clearReconnectInterval();
+		reconnectAttemptRef.current = 0;
+		setReconnectStatus({
+			state: "reconnecting",
+			attempt: 0,
+		});
+		await createSession();
+	}, [clearReconnectInterval, clearReconnectTimer, createSession]);
+
+	const cancelReconnect = useCallback(() => {
+		clearReconnectTimer();
+		clearReconnectInterval();
+		reconnectAttemptRef.current = 0;
+		setReconnectStatus({
+			state: "idle",
+			attempt: 0,
+		});
+	}, [clearReconnectInterval, clearReconnectTimer]);
 
 	/**
 	 * Cancel the current operation.
@@ -648,16 +824,30 @@ export function useAgentSession(
 				message: error.message || "An error occurred",
 				suggestion: error.suggestion,
 			});
+			scheduleReconnect(error.message || "agent error");
 		});
-	}, [agentClient]);
+		return () => {
+			clearReconnectTimer();
+			clearReconnectInterval();
+		};
+	}, [
+		agentClient,
+		clearReconnectInterval,
+		clearReconnectTimer,
+		scheduleReconnect,
+	]);
 
 	return {
 		session,
 		isReady,
 		errorInfo,
+		reconnectStatus,
+		isBridgeEnabled: isBridgeEnabled(),
 		createSession,
 		restartSession,
 		closeSession,
+		reconnectNow,
+		cancelReconnect,
 		cancelOperation,
 		switchAgent,
 		getAvailableAgents,

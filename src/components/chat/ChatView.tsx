@@ -100,6 +100,10 @@ function ChatComponent({
 		session,
 		errorInfo: sessionErrorInfo,
 		isReady: isSessionReady,
+		reconnectStatus,
+		isBridgeEnabled,
+		reconnectNow,
+		cancelReconnect,
 	} = agentSession;
 
 	const chat = useChat(
@@ -163,6 +167,76 @@ function ChatComponent({
 		);
 		return custom?.displayName || custom?.id || activeId;
 	}, [session.agentId, plugin.settings]);
+
+	const connectionStatus = useMemo(() => {
+		let connectionStatusLabel = "Disconnected";
+		let connectionStatusDetail: string | undefined;
+		let connectionStatusTone: "connected" | "connecting" | "reconnecting" | "error" =
+			"error";
+		let showReconnectAction = false;
+		let showCancelReconnectAction = false;
+
+		if (reconnectStatus.state === "scheduled") {
+			connectionStatusTone = "reconnecting";
+			connectionStatusLabel = "Reconnecting soon";
+			const attemptLabel =
+				reconnectStatus.attempt > 0
+					? `attempt ${reconnectStatus.attempt}`
+					: "attempting";
+			if (reconnectStatus.secondsRemaining !== undefined) {
+				connectionStatusDetail = `Retrying in ${reconnectStatus.secondsRemaining}s (${attemptLabel})`;
+			} else {
+				connectionStatusDetail = `Retrying (${attemptLabel})`;
+			}
+			showReconnectAction = true;
+			showCancelReconnectAction = true;
+		} else if (reconnectStatus.state === "reconnecting") {
+			connectionStatusTone = "reconnecting";
+			connectionStatusLabel = "Reconnecting...";
+			if (reconnectStatus.attempt > 0) {
+				connectionStatusDetail = `Attempt ${reconnectStatus.attempt}`;
+			}
+		} else {
+			switch (session.state) {
+				case "ready":
+					connectionStatusTone = "connected";
+					connectionStatusLabel = "Connected";
+					break;
+				case "busy":
+					connectionStatusTone = "connected";
+					connectionStatusLabel = "Connected";
+					connectionStatusDetail = "Busy";
+					break;
+				case "initializing":
+				case "authenticating":
+					connectionStatusTone = "connecting";
+					connectionStatusLabel = "Connecting...";
+					break;
+				case "error":
+				case "disconnected":
+					connectionStatusTone = "error";
+					connectionStatusLabel = "Disconnected";
+					showReconnectAction = true;
+					break;
+				default:
+					connectionStatusTone = "error";
+					connectionStatusLabel = "Disconnected";
+					break;
+			}
+		}
+
+		if (!isBridgeEnabled && reconnectStatus.state === "scheduled") {
+			showCancelReconnectAction = false;
+		}
+
+		return {
+			connectionStatusLabel,
+			connectionStatusDetail,
+			connectionStatusTone,
+			showReconnectAction,
+			showCancelReconnectAction,
+		};
+	}, [isBridgeEnabled, reconnectStatus, session.state]);
 
 	// ============================================================
 	// Callbacks
@@ -502,9 +576,18 @@ function ChatComponent({
 			<ChatHeader
 				agentLabel={activeAgentLabel}
 				isUpdateAvailable={isUpdateAvailable}
+				connectionStatusLabel={connectionStatus.connectionStatusLabel}
+				connectionStatusDetail={connectionStatus.connectionStatusDetail}
+				connectionStatusTone={connectionStatus.connectionStatusTone}
+				showReconnectAction={connectionStatus.showReconnectAction}
+				showCancelReconnectAction={
+					connectionStatus.showCancelReconnectAction
+				}
 				onNewChat={() => void handleNewChat()}
 				onExportChat={() => void handleExportChat()}
 				onOpenSettings={handleOpenSettings}
+				onReconnect={() => void reconnectNow()}
+				onCancelReconnect={cancelReconnect}
 			/>
 
 			<ChatMessages
