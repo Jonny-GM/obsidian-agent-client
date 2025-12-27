@@ -748,6 +748,7 @@ export class ChatView extends ItemView {
 	}
 
 	onOpen() {
+		this.logger.log("[ChatView] onOpen() called");
 		const container = this.contentEl ?? this.containerEl;
 		container.empty();
 

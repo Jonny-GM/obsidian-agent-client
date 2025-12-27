@@ -166,6 +166,7 @@ export default class AgentClientPlugin extends Plugin {
 
 	onunload() {
 		this.logger?.log("[Agent Client] onunload() invoked");
+		void Logger.flush();
 	}
 
 	private async initializePlugin(): Promise<void> {
@@ -400,6 +401,34 @@ export default class AgentClientPlugin extends Plugin {
 	}
 
 	private registerGlobalErrorHandlers(): void {
+		this.registerDomEvent(window, "beforeunload", () => {
+			this.logger?.log("[Agent Client] window beforeunload");
+		});
+
+		this.registerDomEvent(window, "pagehide", (event) => {
+			this.logger?.log("[Agent Client] window pagehide", {
+				persisted:
+					"persisted" in event
+						? (event as PageTransitionEvent).persisted
+						: undefined,
+			});
+		});
+
+		this.registerDomEvent(window, "pageshow", (event) => {
+			this.logger?.log("[Agent Client] window pageshow", {
+				persisted:
+					"persisted" in event
+						? (event as PageTransitionEvent).persisted
+						: undefined,
+			});
+		});
+
+		this.registerDomEvent(document, "visibilitychange", () => {
+			this.logger?.log("[Agent Client] document visibilitychange", {
+				visibilityState: document.visibilityState,
+			});
+		});
+
 		this.registerDomEvent(window, "error", (event) => {
 			const errorEvent = event as ErrorEvent;
 			const errorInfo =
