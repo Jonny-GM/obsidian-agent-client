@@ -103,7 +103,7 @@ function ChatComponent({
 			(plugin.app.vault.adapter as VaultAdapterWithBasePath).basePath ||
 			(Platform.isDesktopApp ? process.cwd() : "")
 		);
-	}, [plugin]);
+	}, [logger, plugin]);
 
 	const noteMentionService = useMemo(
 		() => new NoteMentionService(plugin),
@@ -214,6 +214,18 @@ function ChatComponent({
 
 	const canStartSessionOnMobile =
 		Platform.isMobileApp && !requiresBridgeOnMobile;
+
+	useEffect(() => {
+		logger.log("[ChatView] Mounted", {
+			isMobile: Platform.isMobileApp,
+			isBridgeEnabled,
+			requiresBridgeOnMobile,
+			vaultPath,
+		});
+		return () => {
+			logger.log("[ChatView] Unmounted");
+		};
+	}, [isBridgeEnabled, logger, requiresBridgeOnMobile, vaultPath]);
 
 	// ============================================================
 	// Callbacks
@@ -416,8 +428,26 @@ function ChatComponent({
 			new Notice(
 				"[Agent Client] ACP bridge is required on mobile. Enable it in settings.",
 			);
+			logger.log(
+				"[ChatView] ACP bridge required on mobile. Skipping session creation.",
+			);
 		}
-	}, [requiresBridgeOnMobile]);
+	}, [logger, requiresBridgeOnMobile]);
+
+	useEffect(() => {
+		logger.log("[ChatView] Session state changed", {
+			state: session.state,
+			sessionId: session.sessionId,
+			agentId: session.agentId,
+			isBridgeEnabled,
+		});
+	}, [
+		isBridgeEnabled,
+		logger,
+		session.agentId,
+		session.sessionId,
+		session.state,
+	]);
 
 	// Refs for cleanup (to access latest values in cleanup function)
 	const messagesRef = useRef(messages);
@@ -500,6 +530,10 @@ function ChatComponent({
 			.then(setIsUpdateAvailable)
 			.catch((error) => {
 				console.error("Failed to check for updates:", error);
+				logger.error(
+					"[ChatView] Failed to check for updates:",
+					error,
+				);
 			});
 	}, [plugin]);
 

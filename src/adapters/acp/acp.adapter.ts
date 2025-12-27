@@ -231,7 +231,11 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 						controller.enqueue(textEncoder.encode(event.data));
 					}
 				};
-				const handleClose = () => {
+				const handleClose = (event: CloseEvent) => {
+					this.logger.log(
+						`[AcpAdapter] ACP bridge socket closed for ${agentLabel}:`,
+						{ code: event.code, reason: event.reason },
+					);
 					this.handleBridgeDisconnect(
 						"ACP bridge connection closed",
 						`The ACP bridge connection closed for ${agentLabel}.`,
@@ -239,7 +243,11 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 					);
 					controller.close();
 				};
-				const handleError = () => {
+				const handleError = (event: Event) => {
+					this.logger.error(
+						`[AcpAdapter] ACP bridge socket error for ${agentLabel}:`,
+						event,
+					);
 					this.handleBridgeDisconnect(
 						"ACP bridge connection error",
 						`Failed to communicate with ACP bridge for ${agentLabel}.`,

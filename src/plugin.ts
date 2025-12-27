@@ -1,4 +1,4 @@
-import { Plugin, WorkspaceLeaf, Notice, requestUrl } from "obsidian";
+import { Plugin, WorkspaceLeaf, Notice, Platform, requestUrl } from "obsidian";
 import * as semver from "semver";
 import { ChatView, VIEW_TYPE_CHAT } from "./components/chat/ChatView";
 import {
@@ -141,6 +141,13 @@ export default class AgentClientPlugin extends Plugin {
 		console.debug("[Agent Client] onload() start");
 		try {
 			await this.initializePlugin();
+			this.logger?.log("[Agent Client] Platform:", {
+				isMobile: Platform.isMobileApp,
+				isDesktop: Platform.isDesktopApp,
+				isWin: Platform.isWin,
+				isMacOS: Platform.isMacOS,
+				isLinux: Platform.isLinux,
+			});
 			this.logger?.log("[Agent Client] onload() complete");
 		} catch (error) {
 			console.error(
