@@ -385,12 +385,72 @@ If your plugin does not need CSS, delete this file.
 	justify-content: space-between;
 }
 
+.agent-client-chat-view-header-info {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+	flex: 1;
+}
+
 .agent-client-chat-view-header-title {
 	margin: 0 !important;
 }
 
+.agent-client-chat-view-header-status {
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+}
+
+.agent-client-chat-view-header-status-success {
+	background-color: rgba(var(--color-green-rgb), 0.15);
+	color: var(--color-green);
+}
+
+.agent-client-chat-view-header-status-info {
+	background-color: rgba(var(--color-blue-rgb), 0.15);
+	color: var(--color-blue);
+}
+
+.agent-client-chat-view-header-status-error {
+	background-color: rgba(var(--color-red-rgb), 0.15);
+	color: var(--color-red);
+}
+
+.agent-client-chat-view-header-status-muted {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+.agent-client-chat-view-header-status-detail {
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.agent-client-chat-view-header-status-action {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 2px 8px;
+	font-size: 12px;
+	background: transparent;
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.agent-client-chat-view-header-status-action:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.agent-client-chat-view-header-status-action-muted {
+	color: var(--text-muted);
+}
+
 .agent-client-chat-view-header-update {
-	margin: 0 10px 0 auto !important;
+	margin: 0 !important;
 	padding: 2px 8px;
 	font-size: 11px;
 	color: var(--text-muted);

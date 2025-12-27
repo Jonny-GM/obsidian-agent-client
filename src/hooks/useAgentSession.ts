@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { Platform } from "obsidian";
 import type {
 	ChatSession,
 	SessionState,
@@ -40,6 +41,21 @@ export interface SessionErrorInfo {
 	suggestion?: string;
 }
 
+export type ReconnectStatus =
+	| {
+			state: "idle";
+	  }
+	| {
+			state: "scheduled";
+			attempt: number;
+			nextAttemptAt: Date;
+			secondsRemaining: number;
+	  }
+	| {
+			state: "connecting";
+			attempt: number;
+	  };
+
 /**
  * Return type for useAgentSession hook.
  */
@@ -50,6 +66,12 @@ export interface UseAgentSessionReturn {
 	isReady: boolean;
 	/** Error information if session operation failed */
 	errorInfo: SessionErrorInfo | null;
+
+	/** Reconnect status for ACP bridge */
+	reconnectStatus: ReconnectStatus;
+
+	/** Whether ACP bridge is enabled for this platform */
+	isBridgeEnabled: boolean;
 
 	/**
 	 * Create a new session with the current active agent.
@@ -87,6 +109,16 @@ export interface UseAgentSessionReturn {
 	 * @returns Array of agent info with id and displayName
 	 */
 	getAvailableAgents: () => AgentInfo[];
+
+	/**
+	 * Trigger an immediate reconnect attempt.
+	 */
+	reconnectNow: () => Promise<void>;
+
+	/**
+	 * Cancel any scheduled reconnect attempts.
+	 */
+	cancelReconnect: () => void;
 
 	/**
 	 * Callback to update available slash commands.
@@ -303,14 +335,65 @@ export function useAgentSession(
 	// Error state
 	const [errorInfo, setErrorInfo] = useState<SessionErrorInfo | null>(null);
 
+	// Reconnect state
+	const [reconnectStatus, setReconnectStatus] = useState<ReconnectStatus>({
+		state: "idle",
+	});
+
+	const getBridgeEnabledFromSettings = useCallback(() => {
+		const settings = settingsAccess.getSnapshot();
+		return Platform.isMobileApp
+			? settings.acpBridge.mobile.enabled
+			: settings.acpBridge.desktop.enabled;
+	}, [settingsAccess]);
+
+	const [isBridgeEnabled, setIsBridgeEnabled] = useState(() =>
+		getBridgeEnabledFromSettings(),
+	);
+
+	const reconnectAttemptRef = useRef(0);
+	const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+		null,
+	);
+	const reconnectIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+		null,
+	);
+	const reconnectTargetRef = useRef<Date | null>(null);
+	const manualDisconnectRef = useRef(false);
+	const scheduleReconnectRef = useRef<(reason?: string) => void>(() => {});
+	const isBridgeEnabledRef = useRef(isBridgeEnabled);
+
+	useEffect(() => {
+		isBridgeEnabledRef.current = isBridgeEnabled;
+	}, [isBridgeEnabled]);
+
 	// Derived state
 	const isReady = session.state === "ready";
+
+	const clearReconnectTimers = useCallback(() => {
+		if (reconnectTimeoutRef.current) {
+			clearTimeout(reconnectTimeoutRef.current);
+			reconnectTimeoutRef.current = null;
+		}
+		if (reconnectIntervalRef.current) {
+			clearInterval(reconnectIntervalRef.current);
+			reconnectIntervalRef.current = null;
+		}
+		reconnectTargetRef.current = null;
+	}, []);
+
+	const resetReconnectState = useCallback(() => {
+		clearReconnectTimers();
+		reconnectAttemptRef.current = 0;
+		setReconnectStatus({ state: "idle" });
+	}, [clearReconnectTimers]);
 
 	/**
 	 * Create a new session with the active agent.
 	 * (Inlined from ManageSessionUseCase.createSession)
 	 */
 	const createSession = useCallback(async () => {
+		manualDisconnectRef.current = false;
 		// Get current settings and agent info
 		const settings = settingsAccess.getSnapshot();
 		const activeAgentId = getActiveAgentId(settings);
@@ -399,6 +482,7 @@ export function useAgentSession(
 					: prev.promptCapabilities,
 				lastActivityAt: new Date(),
 			}));
+			resetReconnectState();
 		} catch (error) {
 			// Error - update to error state
 			setSession((prev) => ({ ...prev, state: "error" }));
@@ -408,8 +492,103 @@ export function useAgentSession(
 				suggestion:
 					"Please check the agent configuration and try again.",
 			});
+			scheduleReconnectRef.current(
+				error instanceof Error ? error.message : String(error),
+			);
 		}
-	}, [agentClient, settingsAccess, workingDirectory]);
+	}, [
+		agentClient,
+		resetReconnectState,
+		settingsAccess,
+		workingDirectory,
+	]);
+
+	const reconnectNow = useCallback(
+		async (attemptOverride?: number) => {
+			if (!isBridgeEnabledRef.current) {
+				return;
+			}
+			manualDisconnectRef.current = false;
+			clearReconnectTimers();
+
+			const attempt =
+				attemptOverride ?? reconnectAttemptRef.current + 1;
+			reconnectAttemptRef.current = attempt;
+			setReconnectStatus({ state: "connecting", attempt });
+
+			await createSession();
+		},
+		[clearReconnectTimers, createSession],
+	);
+
+	const scheduleReconnect = useCallback(
+		(reason?: string) => {
+			if (!isBridgeEnabledRef.current || manualDisconnectRef.current) {
+				return;
+			}
+			if (reconnectTimeoutRef.current) {
+				return;
+			}
+
+			const attempt = reconnectAttemptRef.current + 1;
+			reconnectAttemptRef.current = attempt;
+
+			const baseDelayMs = 2_000;
+			const maxDelayMs = 30_000;
+			const delayMs = Math.min(
+				maxDelayMs,
+				baseDelayMs * 2 ** (attempt - 1),
+			);
+			const nextAttemptAt = new Date(Date.now() + delayMs);
+			reconnectTargetRef.current = nextAttemptAt;
+
+			setReconnectStatus({
+				state: "scheduled",
+				attempt,
+				nextAttemptAt,
+				secondsRemaining: Math.ceil(delayMs / 1000),
+			});
+
+			reconnectIntervalRef.current = setInterval(() => {
+				const target = reconnectTargetRef.current;
+				if (!target) {
+					return;
+				}
+				const secondsRemaining = Math.max(
+					0,
+					Math.ceil((target.getTime() - Date.now()) / 1000),
+				);
+				setReconnectStatus((prev) => {
+					if (prev.state !== "scheduled") {
+						return prev;
+					}
+					return { ...prev, secondsRemaining };
+				});
+			}, 1000);
+
+			reconnectTimeoutRef.current = setTimeout(() => {
+				void reconnectNow(attempt);
+			}, delayMs);
+		},
+		[reconnectNow],
+	);
+
+	useEffect(() => {
+		scheduleReconnectRef.current = scheduleReconnect;
+	}, [scheduleReconnect]);
+
+	const cancelReconnect = useCallback(() => {
+		resetReconnectState();
+	}, [resetReconnectState]);
+
+	useEffect(() => {
+		const unsubscribe = settingsAccess.subscribe(() => {
+			setIsBridgeEnabled(getBridgeEnabledFromSettings());
+		});
+		return () => {
+			unsubscribe();
+		};
+	}, [getBridgeEnabledFromSettings, settingsAccess]);
 
 	/**
 	 * Restart the current session.
@@ -423,6 +602,8 @@ export function useAgentSession(
 	 * Cancels any running operation and kills the agent process.
 	 */
 	const closeSession = useCallback(async () => {
+		manualDisconnectRef.current = true;
+		cancelReconnect();
 		// Cancel current session if active
 		if (session.sessionId) {
 			try {
@@ -446,7 +627,7 @@ export function useAgentSession(
 			sessionId: null,
 			state: "disconnected",
 		}));
-	}, [agentClient, session.sessionId]);
+	}, [agentClient, cancelReconnect, session.sessionId]);
 
 	/**
 	 * Cancel the current operation.
@@ -648,19 +829,30 @@ export function useAgentSession(
 				message: error.message || "An error occurred",
 				suggestion: error.suggestion,
 			});
+			scheduleReconnectRef.current(error.message);
 		});
 	}, [agentClient]);
+
+	useEffect(() => {
+		return () => {
+			clearReconnectTimers();
+		};
+	}, [clearReconnectTimers]);
 
 	return {
 		session,
 		isReady,
 		errorInfo,
+		reconnectStatus,
+		isBridgeEnabled,
 		createSession,
 		restartSession,
 		closeSession,
 		cancelOperation,
 		switchAgent,
 		getAvailableAgents,
+		reconnectNow: () => reconnectNow(),
+		cancelReconnect,
 		updateAvailableCommands,
 		updateCurrentMode,
 		setMode,

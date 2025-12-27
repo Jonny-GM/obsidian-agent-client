@@ -100,6 +100,8 @@ function ChatComponent({
 		session,
 		errorInfo: sessionErrorInfo,
 		isReady: isSessionReady,
+		reconnectStatus,
+		isBridgeEnabled,
 	} = agentSession;
 
 	const chat = useChat(
@@ -560,9 +562,14 @@ function ChatComponent({
 			<ChatHeader
 				agentLabel={activeAgentLabel}
 				isUpdateAvailable={isUpdateAvailable}
+				sessionState={session.state}
+				reconnectStatus={reconnectStatus}
+				isBridgeEnabled={isBridgeEnabled}
 				onNewChat={() => void handleNewChat()}
 				onExportChat={() => void handleExportChat()}
 				onOpenSettings={handleOpenSettings}
+				onReconnectNow={() => void agentSession.reconnectNow()}
+				onCancelReconnect={agentSession.cancelReconnect}
 			/>
 
 			<ChatMessages
