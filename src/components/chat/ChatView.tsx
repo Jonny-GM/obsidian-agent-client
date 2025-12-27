@@ -101,7 +101,6 @@ function ChatComponent({
 		errorInfo: sessionErrorInfo,
 		isReady: isSessionReady,
 		reconnectStatus,
-		isBridgeEnabled,
 		reconnectNow,
 		cancelReconnect,
 	} = agentSession;
@@ -168,6 +167,12 @@ function ChatComponent({
 		return custom?.displayName || custom?.id || activeId;
 	}, [session.agentId, plugin.settings]);
 
+	const isBridgeEnabled = useMemo(() => {
+		return Platform.isMobileApp
+			? settings.acpBridge.mobile.enabled
+			: settings.acpBridge.desktop.enabled;
+	}, [settings]);
+
 	const connectionStatus = useMemo(() => {
 		let connectionStatusLabel = "Disconnected";
 		let connectionStatusDetail: string | undefined;
@@ -175,6 +180,21 @@ function ChatComponent({
 			"error";
 		let showReconnectAction = false;
 		let showCancelReconnectAction = false;
+
+		if (requiresBridgeOnMobile) {
+			connectionStatusTone = "error";
+			connectionStatusLabel = "ACP bridge required";
+			connectionStatusDetail = "Enable ACP bridge in settings.";
+			showReconnectAction = false;
+			showCancelReconnectAction = false;
+			return {
+				connectionStatusLabel,
+				connectionStatusDetail,
+				connectionStatusTone,
+				showReconnectAction,
+				showCancelReconnectAction,
+			};
+		}
 
 		if (reconnectStatus.state === "scheduled") {
 			connectionStatusTone = "reconnecting";
@@ -236,7 +256,12 @@ function ChatComponent({
 			showReconnectAction,
 			showCancelReconnectAction,
 		};
-	}, [isBridgeEnabled, reconnectStatus, session.state]);
+	}, [
+		isBridgeEnabled,
+		requiresBridgeOnMobile,
+		reconnectStatus,
+		session.state,
+	]);
 
 	// ============================================================
 	// Callbacks

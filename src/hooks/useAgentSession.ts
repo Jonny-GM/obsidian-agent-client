@@ -63,9 +63,6 @@ export interface UseAgentSessionReturn {
 	/** Status of automatic reconnect attempts */
 	reconnectStatus: ReconnectStatus;
 
-	/** Whether the ACP bridge is enabled for this platform */
-	isBridgeEnabled: boolean;
-
 	/**
 	 * Create a new session with the current active agent.
 	 * Resets session state and initializes connection.
@@ -842,7 +839,6 @@ export function useAgentSession(
 		isReady,
 		errorInfo,
 		reconnectStatus,
-		isBridgeEnabled: isBridgeEnabled(),
 		createSession,
 		restartSession,
 		closeSession,
