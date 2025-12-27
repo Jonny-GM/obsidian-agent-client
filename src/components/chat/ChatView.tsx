@@ -314,11 +314,17 @@ function ChatComponent({
 				if (session.sessionId) {
 					return true;
 				}
-				if (!canStartSessionOnMobile) {
+				if (
+					session.state === "initializing" ||
+					session.state === "authenticating"
+				) {
+					return (await waitForSessionReady()) !== null;
+				}
+				if (requiresBridgeOnMobile) {
 					return false;
 				}
-				if (session.state === "initializing") {
-					return (await waitForSessionReady()) !== null;
+				if (!canStartSessionOnMobile && !isBridgeEnabled) {
+					return false;
 				}
 				await agentSession.createSession();
 				return (await waitForSessionReady()) !== null;
@@ -345,7 +351,9 @@ function ChatComponent({
 			agentSession,
 			autoMention,
 			canStartSessionOnMobile,
+			isBridgeEnabled,
 			plugin,
+			requiresBridgeOnMobile,
 			session.sessionId,
 			session.state,
 		],
@@ -375,13 +383,18 @@ function ChatComponent({
 	// ============================================================
 	// Initialize session on mount or when agent changes
 	useEffect(() => {
-		if (requiresBridgeOnMobile) {
+		if (requiresBridgeOnMobile || isBridgeEnabled) {
 			return;
 		}
 
 		logger.log("[Debug] Starting connection setup via useAgentSession...");
 		void agentSession.createSession();
-	}, [session.agentId, agentSession.createSession, requiresBridgeOnMobile]);
+	}, [
+		session.agentId,
+		agentSession.createSession,
+		isBridgeEnabled,
+		requiresBridgeOnMobile,
+	]);
 
 	useEffect(() => {
 		if (!pendingSessionResolver.current) {
