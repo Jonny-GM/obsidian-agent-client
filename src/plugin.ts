@@ -1,4 +1,12 @@
-import { Plugin, WorkspaceLeaf, Notice, Platform, requestUrl } from "obsidian";
+import {
+	App,
+	Notice,
+	Platform,
+	Plugin,
+	PluginManifest,
+	WorkspaceLeaf,
+	requestUrl,
+} from "obsidian";
 import * as semver from "semver";
 import { ChatView, VIEW_TYPE_CHAT } from "./components/chat/ChatView";
 import {
@@ -130,15 +138,31 @@ const DEFAULT_SETTINGS: AgentClientPluginSettings = {
 };
 
 export default class AgentClientPlugin extends Plugin {
+	private static instanceCounter = 0;
 	settings: AgentClientPluginSettings;
 	settingsStore!: SettingsStore;
 	private logger: Logger | null = null;
+	private instanceId: string;
+	private instanceNumber: number;
 
 	// Active ACP adapter instance (shared across use cases)
 	acpAdapter: import("./adapters/acp/acp.adapter").AcpAdapter | null = null;
 
+	constructor(app: App, manifest: PluginManifest) {
+		super(app, manifest);
+		AgentClientPlugin.instanceCounter += 1;
+		this.instanceNumber = AgentClientPlugin.instanceCounter;
+		this.instanceId =
+			typeof crypto !== "undefined" && "randomUUID" in crypto
+				? crypto.randomUUID()
+				: `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+	}
+
 	async onload() {
-		console.debug("[Agent Client] onload() start");
+		console.debug("[Agent Client] onload() start", {
+			instanceId: this.instanceId,
+			instanceNumber: this.instanceNumber,
+		});
 		try {
 			await this.initializePlugin();
 			this.logger?.log("[Agent Client] Platform:", {
@@ -148,7 +172,10 @@ export default class AgentClientPlugin extends Plugin {
 				isMacOS: Platform.isMacOS,
 				isLinux: Platform.isLinux,
 			});
-			this.logger?.log("[Agent Client] onload() complete");
+			this.logger?.log("[Agent Client] onload() complete", {
+				instanceId: this.instanceId,
+				instanceNumber: this.instanceNumber,
+			});
 		} catch (error) {
 			console.error(
 				"[Agent Client] Failed to initialize plugin:",
@@ -165,7 +192,10 @@ export default class AgentClientPlugin extends Plugin {
 	}
 
 	onunload() {
-		this.logger?.log("[Agent Client] onunload() invoked");
+		this.logger?.log("[Agent Client] onunload() invoked", {
+			instanceId: this.instanceId,
+			instanceNumber: this.instanceNumber,
+		});
 		void Logger.flush();
 	}
 
