@@ -144,6 +144,7 @@ export default class AgentClientPlugin extends Plugin {
 	private logger: Logger | null = null;
 	private instanceId: string;
 	private instanceNumber: number;
+	private onloadStartedAt: number | null = null;
 
 	// Active ACP adapter instance (shared across use cases)
 	acpAdapter: import("./adapters/acp/acp.adapter").AcpAdapter | null = null;
@@ -159,6 +160,7 @@ export default class AgentClientPlugin extends Plugin {
 	}
 
 	async onload() {
+		this.onloadStartedAt = Date.now();
 		console.debug("[Agent Client] onload() start", {
 			instanceId: this.instanceId,
 			instanceNumber: this.instanceNumber,
@@ -175,12 +177,24 @@ export default class AgentClientPlugin extends Plugin {
 			this.logger?.log("[Agent Client] onload() complete", {
 				instanceId: this.instanceId,
 				instanceNumber: this.instanceNumber,
+				elapsedMs:
+					this.onloadStartedAt !== null
+						? Date.now() - this.onloadStartedAt
+						: undefined,
 			});
 		} catch (error) {
 			console.error(
 				"[Agent Client] Failed to initialize plugin:",
 				error,
 			);
+			console.error("[Agent Client] onload() failed", {
+				instanceId: this.instanceId,
+				instanceNumber: this.instanceNumber,
+				elapsedMs:
+					this.onloadStartedAt !== null
+						? Date.now() - this.onloadStartedAt
+						: undefined,
+			});
 			this.logger?.error(
 				"[Agent Client] Failed to initialize plugin:",
 				error,
@@ -200,6 +214,7 @@ export default class AgentClientPlugin extends Plugin {
 	}
 
 	private async initializePlugin(): Promise<void> {
+		const initializeStartedAt = Date.now();
 		console.debug("[Agent Client] initializePlugin() start", {
 			instanceId: this.instanceId,
 			instanceNumber: this.instanceNumber,
@@ -262,6 +277,7 @@ export default class AgentClientPlugin extends Plugin {
 		this.logger.log("[Agent Client] initializePlugin() continuing", {
 			instanceId: this.instanceId,
 			instanceNumber: this.instanceNumber,
+			elapsedMs: Date.now() - initializeStartedAt,
 		});
 
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
@@ -309,7 +325,9 @@ export default class AgentClientPlugin extends Plugin {
 				this.logger?.log("[Agent Client] workspace layout change");
 			}),
 		);
-		console.debug("[Agent Client] initializePlugin() complete");
+		console.debug("[Agent Client] initializePlugin() complete", {
+			elapsedMs: Date.now() - initializeStartedAt,
+		});
 	}
 
 	async activateView() {
