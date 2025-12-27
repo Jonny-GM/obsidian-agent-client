@@ -145,6 +145,7 @@ export default class AgentClientPlugin extends Plugin {
 	private instanceId: string;
 	private instanceNumber: number;
 	private onloadStartedAt: number | null = null;
+	private heartbeatIntervalMs = 30000;
 
 	// Active ACP adapter instance (shared across use cases)
 	acpAdapter: import("./adapters/acp/acp.adapter").AcpAdapter | null = null;
@@ -312,6 +313,40 @@ export default class AgentClientPlugin extends Plugin {
 
 		this.registerGlobalErrorHandlers();
 		this.logger.log("[Agent Client] Registered global error handlers");
+		if (this.settings.debugMode) {
+			this.registerInterval(
+				window.setInterval(() => {
+					const activeLeaf = this.app.workspace.activeLeaf;
+					const activeViewType = activeLeaf?.view?.getViewType();
+					this.logger?.log("[Agent Client] heartbeat", {
+						instanceId: this.instanceId,
+						instanceNumber: this.instanceNumber,
+						visibilityState: document.visibilityState,
+						activeViewType,
+						agentClientLeaves:
+							this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)
+								.length,
+					});
+				}, this.heartbeatIntervalMs),
+			);
+		}
+		this.registerEvent(
+			this.app.workspace.on("file-open", (file) => {
+				this.logger?.log("[Agent Client] workspace file-open", {
+					path: file?.path ?? null,
+				});
+			}),
+		);
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				this.logger?.log(
+					"[Agent Client] workspace active-leaf-change",
+					{
+						viewType: leaf?.view?.getViewType() ?? null,
+					},
+				);
+			}),
+		);
 		this.registerEvent(
 			this.app.workspace.on("quit", () => {
 				this.logger?.log("[Agent Client] workspace quit event");
