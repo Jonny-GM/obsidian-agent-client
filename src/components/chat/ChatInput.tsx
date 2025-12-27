@@ -50,6 +50,8 @@ export interface ChatInputProps {
 	isSending: boolean;
 	/** Whether the session is ready for user input */
 	isSessionReady: boolean;
+	/** Whether user can start a session from the input */
+	canStartSession?: boolean;
 	/** Display name of the active agent */
 	agentLabel: string;
 	/** Available slash commands */
@@ -106,6 +108,7 @@ export interface ChatInputProps {
 export function ChatInput({
 	isSending,
 	isSessionReady,
+	canStartSession = false,
 	agentLabel,
 	availableCommands,
 	autoMentionEnabled,
@@ -598,7 +601,7 @@ export function ChatInput({
 						!isSending &&
 						((inputValue.trim() === "" &&
 							attachedImages.length === 0) ||
-							!isSessionReady);
+							!(isSessionReady || canStartSession));
 					if (!buttonDisabled && !isSending) {
 						void handleSendOrStop();
 					}
@@ -611,6 +614,7 @@ export function ChatInput({
 			isSending,
 			inputValue,
 			isSessionReady,
+			canStartSession,
 			handleSendOrStop,
 			settings.sendMessageShortcut,
 			attachedImages.length,
@@ -832,10 +836,10 @@ export function ChatInput({
 	}, [currentModelId]);
 
 	// Button disabled state - also allow sending if images are attached
-	const isButtonDisabled =
-		!isSending &&
-		((inputValue.trim() === "" && attachedImages.length === 0) ||
-			!isSessionReady);
+		const isButtonDisabled =
+			!isSending &&
+			((inputValue.trim() === "" && attachedImages.length === 0) ||
+				!(isSessionReady || canStartSession));
 
 	// Placeholder text
 	const placeholder = `Message ${agentLabel} - @ to mention notes${availableCommands.length > 0 ? ", / for commands" : ""}`;
