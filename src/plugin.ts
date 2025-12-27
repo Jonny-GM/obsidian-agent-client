@@ -795,13 +795,22 @@ export default class AgentClientPlugin extends Plugin {
 		};
 
 		this.ensureActiveAgentId();
+		this.logger?.log("[Agent Client] Settings loaded", {
+			activeAgentId: this.settings.activeAgentId,
+			debugMode: this.settings.debugMode,
+		});
 	}
 
 	async saveSettings() {
+		this.logger?.log("[Agent Client] saveSettings() invoked");
 		await this.saveData(this.settings);
 	}
 
 	async saveSettingsAndNotify(nextSettings: AgentClientPluginSettings) {
+		this.logger?.log("[Agent Client] saveSettingsAndNotify() invoked", {
+			activeAgentId: nextSettings.activeAgentId,
+			debugMode: nextSettings.debugMode,
+		});
 		this.settings = nextSettings;
 		await this.saveData(this.settings);
 		this.settingsStore.set(this.settings);
