@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import type {
 	NoteMetadata,
 	IVaultAccess,
@@ -37,6 +37,7 @@ export function useAutoMention(
 ): UseAutoMentionReturn {
 	const [activeNote, setActiveNote] = useState<NoteMetadata | null>(null);
 	const [isDisabled, setIsDisabled] = useState(false);
+	const activeNoteRequestId = useRef(0);
 
 	const toggle = useCallback((disabled?: boolean) => {
 		if (disabled === undefined) {
@@ -49,8 +50,12 @@ export function useAutoMention(
 	}, []);
 
 	const updateActiveNote = useCallback(async () => {
+		const requestId = activeNoteRequestId.current + 1;
+		activeNoteRequestId.current = requestId;
 		const note = await vaultAccess.getActiveNote();
-		setActiveNote(note);
+		if (activeNoteRequestId.current === requestId) {
+			setActiveNote(note);
+		}
 	}, [vaultAccess]);
 
 	return {
