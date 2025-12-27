@@ -367,6 +367,13 @@ export function useAgentSession(
 		isBridgeEnabledRef.current = isBridgeEnabled;
 	}, [isBridgeEnabled]);
 
+	useEffect(() => {
+		return () => {
+			manualDisconnectRef.current = true;
+			clearReconnectTimers();
+		};
+	}, [clearReconnectTimers]);
+
 	// Derived state
 	const isReady = session.state === "ready";
 
