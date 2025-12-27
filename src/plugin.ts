@@ -1,4 +1,12 @@
-import { Plugin, WorkspaceLeaf, Notice, requestUrl } from "obsidian";
+import {
+	App,
+	Notice,
+	Platform,
+	Plugin,
+	PluginManifest,
+	WorkspaceLeaf,
+	requestUrl,
+} from "obsidian";
 import * as semver from "semver";
 import { ChatView, VIEW_TYPE_CHAT } from "./components/chat/ChatView";
 import {
@@ -47,6 +55,7 @@ export interface AgentClientPluginSettings {
 	autoAllowPermissions: boolean;
 	autoMentionActiveNote: boolean;
 	debugMode: boolean;
+	debugWriteToVaultLog: boolean;
 	nodePath: string;
 	acpBridge: {
 		desktop: AcpBridgeSettings;
@@ -99,6 +108,7 @@ const DEFAULT_SETTINGS: AgentClientPluginSettings = {
 	autoAllowPermissions: false,
 	autoMentionActiveNote: true,
 	debugMode: false,
+	debugWriteToVaultLog: false,
 	nodePath: "",
 	acpBridge: {
 		desktop: {
@@ -130,23 +140,67 @@ const DEFAULT_SETTINGS: AgentClientPluginSettings = {
 };
 
 export default class AgentClientPlugin extends Plugin {
+	private static instanceCounter = 0;
 	settings: AgentClientPluginSettings;
 	settingsStore!: SettingsStore;
 	private logger: Logger | null = null;
+	private instanceId: string;
+	private instanceNumber: number;
+	private onloadStartedAt: number | null = null;
+	private heartbeatIntervalMs = 30000;
+	private lastHeartbeatAt: number | null = null;
 
 	// Active ACP adapter instance (shared across use cases)
 	acpAdapter: import("./adapters/acp/acp.adapter").AcpAdapter | null = null;
 
+	constructor(app: App, manifest: PluginManifest) {
+		super(app, manifest);
+		AgentClientPlugin.instanceCounter += 1;
+		this.instanceNumber = AgentClientPlugin.instanceCounter;
+		this.instanceId =
+			typeof crypto !== "undefined" && "randomUUID" in crypto
+				? crypto.randomUUID()
+				: `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+	}
+
 	async onload() {
-		console.debug("[Agent Client] onload() start");
+		this.onloadStartedAt = Date.now();
+		console.debug("[Agent Client] onload() start", {
+			instanceId: this.instanceId,
+			instanceNumber: this.instanceNumber,
+			manifestId: this.manifest.id,
+			manifestVersion: this.manifest.version,
+		});
 		try {
 			await this.initializePlugin();
-			this.logger?.log("[Agent Client] onload() complete");
+			this.logger?.log("[Agent Client] Platform:", {
+				isMobile: Platform.isMobileApp,
+				isDesktop: Platform.isDesktopApp,
+				isWin: Platform.isWin,
+				isMacOS: Platform.isMacOS,
+				isLinux: Platform.isLinux,
+			});
+			this.logger?.log("[Agent Client] onload() complete", {
+				instanceId: this.instanceId,
+				instanceNumber: this.instanceNumber,
+				elapsedMs:
+					this.onloadStartedAt !== null
+						? Date.now() - this.onloadStartedAt
+						: undefined,
+			});
 		} catch (error) {
 			console.error(
 				"[Agent Client] Failed to initialize plugin:",
 				error,
 			);
+			console.error("[Agent Client] onload() failed", {
+				instanceId: this.instanceId,
+				instanceNumber: this.instanceNumber,
+				elapsedMs:
+					this.onloadStartedAt !== null
+						? Date.now() - this.onloadStartedAt
+						: undefined,
+			});
 			this.logger?.error(
 				"[Agent Client] Failed to initialize plugin:",
 				error,
@@ -158,15 +212,24 @@ export default class AgentClientPlugin extends Plugin {
 	}
 
 	onunload() {
-		this.logger?.log("[Agent Client] onunload() invoked");
+		this.logger?.log("[Agent Client] onunload() invoked", {
+			instanceId: this.instanceId,
+			instanceNumber: this.instanceNumber,
+		});
+		void Logger.flush();
 	}
 
 	private async initializePlugin(): Promise<void> {
-		console.debug("[Agent Client] initializePlugin() start");
+		const initializeStartedAt = Date.now();
+		console.debug("[Agent Client] initializePlugin() start", {
+			instanceId: this.instanceId,
+			instanceNumber: this.instanceNumber,
+		});
 		let loadAttempt = 1;
 		try {
 			console.debug("[Agent Client] Loading settings (attempt 1)");
 			await this.loadSettings();
+			console.debug("[Agent Client] Settings loaded (attempt 1)");
 		} catch (error) {
 			console.error(
 				"[Agent Client] Failed to load settings. Retrying after layout ready.",
@@ -178,6 +241,7 @@ export default class AgentClientPlugin extends Plugin {
 			loadAttempt = 2;
 			console.debug("[Agent Client] Loading settings (attempt 2)");
 			await this.loadSettings();
+			console.debug("[Agent Client] Settings loaded (attempt 2)");
 		}
 
 		if (!this.settings.debugMode) {
@@ -188,9 +252,40 @@ export default class AgentClientPlugin extends Plugin {
 		// Initialize settings store
 		this.settingsStore = createSettingsStore(this.settings, this);
 		this.logger = new Logger(this);
+		this.logger.log("[Agent Client] Settings snapshot:", {
+			manifestVersion: this.manifest.version,
+			activeAgentId: this.settings.activeAgentId,
+			debugMode: this.settings.debugMode,
+			debugWriteToVaultLog: this.settings.debugWriteToVaultLog,
+			autoAllowPermissions: this.settings.autoAllowPermissions,
+			autoMentionActiveNote: this.settings.autoMentionActiveNote,
+			nodePathConfigured:
+				this.settings.nodePath && this.settings.nodePath.trim().length > 0,
+			acpBridge: {
+				mobile: {
+					enabled: this.settings.acpBridge.mobile.enabled,
+					host: this.settings.acpBridge.mobile.host,
+					port: this.settings.acpBridge.mobile.port,
+					tokenConfigured:
+						this.settings.acpBridge.mobile.token.trim().length > 0,
+				},
+				desktop: {
+					enabled: this.settings.acpBridge.desktop.enabled,
+					host: this.settings.acpBridge.desktop.host,
+					port: this.settings.acpBridge.desktop.port,
+					tokenConfigured:
+						this.settings.acpBridge.desktop.token.trim().length > 0,
+				},
+			},
+		});
 		this.logger.log(
 			`[Agent Client] Plugin initialized (settings load attempt: ${loadAttempt})`,
 		);
+		this.logger.log("[Agent Client] initializePlugin() continuing", {
+			instanceId: this.instanceId,
+			instanceNumber: this.instanceNumber,
+			elapsedMs: Date.now() - initializeStartedAt,
+		});
 
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 		this.logger.log("[Agent Client] Registered chat view");
@@ -224,7 +319,58 @@ export default class AgentClientPlugin extends Plugin {
 
 		this.registerGlobalErrorHandlers();
 		this.logger.log("[Agent Client] Registered global error handlers");
-		console.debug("[Agent Client] initializePlugin() complete");
+		if (this.settings.debugMode) {
+			this.registerInterval(
+				window.setInterval(() => {
+					this.lastHeartbeatAt = Date.now();
+					const activeLeaf = this.app.workspace.activeLeaf;
+					const activeViewType = activeLeaf?.view?.getViewType();
+					this.logger?.log("[Agent Client] heartbeat", {
+						instanceId: this.instanceId,
+						instanceNumber: this.instanceNumber,
+						timestamp: new Date().toISOString(),
+						visibilityState: document.visibilityState,
+						activeViewType,
+						agentClientLeaves:
+							this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)
+								.length,
+					});
+				}, this.heartbeatIntervalMs),
+			);
+		}
+		this.registerEvent(
+			this.app.workspace.on("file-open", (file) => {
+				this.logger?.log("[Agent Client] workspace file-open", {
+					path: file?.path ?? null,
+				});
+			}),
+		);
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				this.logger?.log(
+					"[Agent Client] workspace active-leaf-change",
+					{
+						viewType: leaf?.view?.getViewType() ?? null,
+					},
+				);
+			}),
+		);
+		this.registerEvent(
+			this.app.workspace.on("quit", () => {
+				this.logger?.log("[Agent Client] workspace quit event");
+			}),
+		);
+		this.app.workspace.onLayoutReady(() => {
+			this.logger?.log("[Agent Client] workspace layout ready");
+		});
+		this.registerEvent(
+			this.app.workspace.on("layout-change", () => {
+				this.logger?.log("[Agent Client] workspace layout change");
+			}),
+		);
+		console.debug("[Agent Client] initializePlugin() complete", {
+			elapsedMs: Date.now() - initializeStartedAt,
+		});
 	}
 
 	async activateView() {
@@ -368,20 +514,99 @@ export default class AgentClientPlugin extends Plugin {
 	}
 
 	private registerGlobalErrorHandlers(): void {
+		this.registerDomEvent(window, "focus", () => {
+			this.logger?.log("[Agent Client] window focus");
+		});
+
+		this.registerDomEvent(window, "blur", () => {
+			this.logger?.log("[Agent Client] window blur");
+		});
+
+		this.registerDomEvent(window, "beforeunload", () => {
+			this.logger?.log("[Agent Client] window beforeunload");
+		});
+
+		this.registerDomEvent(window, "unload", () => {
+			this.logger?.log("[Agent Client] window unload");
+		});
+
+		this.registerDomEvent(window, "pagehide", (event) => {
+			this.logger?.log("[Agent Client] window pagehide", {
+				persisted:
+					"persisted" in event
+						? (event as PageTransitionEvent).persisted
+						: undefined,
+			});
+		});
+
+		this.registerDomEvent(window, "pageshow", (event) => {
+			this.logger?.log("[Agent Client] window pageshow", {
+				persisted:
+					"persisted" in event
+						? (event as PageTransitionEvent).persisted
+						: undefined,
+			});
+		});
+
+		this.registerDomEvent(document, "visibilitychange", () => {
+			this.logger?.log("[Agent Client] document visibilitychange", {
+				visibilityState: document.visibilityState,
+				lastHeartbeatAt: this.lastHeartbeatAt,
+			});
+		});
+
+		const maybeProcess = globalThis.process as NodeJS.Process | undefined;
+		if (maybeProcess?.on) {
+			const handleProcessExit = (event: string, detail?: unknown) => {
+				this.logger?.log(`[Agent Client] process ${event}`, detail);
+			};
+			maybeProcess.on("exit", (code) =>
+				handleProcessExit("exit", { code }),
+			);
+			maybeProcess.on("beforeExit", (code) =>
+				handleProcessExit("beforeExit", { code }),
+			);
+			maybeProcess.on("uncaughtException", (error) =>
+				handleProcessExit("uncaughtException", {
+					message: error.message,
+					stack: error.stack,
+				}),
+			);
+		}
+
 		this.registerDomEvent(window, "error", (event) => {
 			const errorEvent = event as ErrorEvent;
 			const errorInfo =
 				errorEvent.error instanceof Error
 					? errorEvent.error
 					: errorEvent.message;
-			this.logger?.error("[Agent Client] Window error:", errorInfo);
+			this.logger?.error("[Agent Client] Window error:", {
+				message: errorEvent.message,
+				filename: errorEvent.filename,
+				lineno: errorEvent.lineno,
+				colno: errorEvent.colno,
+				error:
+					errorEvent.error instanceof Error
+						? {
+								name: errorEvent.error.name,
+								message: errorEvent.error.message,
+								stack: errorEvent.error.stack,
+							}
+						: errorInfo,
+			});
 		});
 
 		this.registerDomEvent(window, "unhandledrejection", (event) => {
 			const rejectionEvent = event as PromiseRejectionEvent;
 			this.logger?.error(
 				"[Agent Client] Unhandled rejection:",
-				rejectionEvent.reason,
+				rejectionEvent.reason instanceof Error
+					? {
+							name: rejectionEvent.reason.name,
+							message: rejectionEvent.reason.message,
+							stack: rejectionEvent.reason.stack,
+						}
+					: rejectionEvent.reason,
 			);
 		});
 	}
@@ -565,6 +790,10 @@ export default class AgentClientPlugin extends Plugin {
 				typeof rawSettings.debugMode === "boolean"
 					? rawSettings.debugMode
 					: DEFAULT_SETTINGS.debugMode,
+			debugWriteToVaultLog:
+				typeof rawSettings.debugWriteToVaultLog === "boolean"
+					? rawSettings.debugWriteToVaultLog
+					: DEFAULT_SETTINGS.debugWriteToVaultLog,
 			nodePath:
 				typeof rawSettings.nodePath === "string"
 					? rawSettings.nodePath.trim()
@@ -645,13 +874,26 @@ export default class AgentClientPlugin extends Plugin {
 		};
 
 		this.ensureActiveAgentId();
+		this.logger?.log("[Agent Client] Settings loaded", {
+			activeAgentId: this.settings.activeAgentId,
+			debugMode: this.settings.debugMode,
+			debugWriteToVaultLog: this.settings.debugWriteToVaultLog,
+			vaultName: this.app.vault.getName(),
+			workspaceLeaves: this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT)
+				.length,
+		});
 	}
 
 	async saveSettings() {
+		this.logger?.log("[Agent Client] saveSettings() invoked");
 		await this.saveData(this.settings);
 	}
 
 	async saveSettingsAndNotify(nextSettings: AgentClientPluginSettings) {
+		this.logger?.log("[Agent Client] saveSettingsAndNotify() invoked", {
+			activeAgentId: nextSettings.activeAgentId,
+			debugMode: nextSettings.debugMode,
+		});
 		this.settings = nextSettings;
 		await this.saveData(this.settings);
 		this.settingsStore.set(this.settings);
