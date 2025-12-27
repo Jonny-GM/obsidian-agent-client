@@ -404,6 +404,10 @@ type DiffHunk = {
 
 const DIFF_CONTEXT_LINES = 3;
 
+function normalizeNewlines(text: string): string {
+	return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 function splitLines(text: string): string[] {
 	const lines = text.split("\n");
 	if (lines.length > 0 && lines[lines.length - 1] === "") {
@@ -413,7 +417,9 @@ function splitLines(text: string): string[] {
 }
 
 function buildDiffLines(oldText: string, newText: string): DiffLine[] {
-	const changes = diffLines(oldText, newText) as Change[];
+	const normalizedOld = normalizeNewlines(oldText);
+	const normalizedNew = normalizeNewlines(newText);
+	const changes = diffLines(normalizedOld, normalizedNew) as Change[];
 	const lines: DiffLine[] = [];
 
 	changes.forEach((change: Change) => {
@@ -457,10 +463,11 @@ function DiffRenderer({ diff, plugin }: DiffRendererProps) {
 			diff.oldText === ""
 		) {
 			// New file
+			const normalizedNewText = normalizeNewlines(diff.newText);
 			return (
 				<div className="agent-client-tool-call-diff-new-file">
 					<div className="agent-client-diff-line-info">New file</div>
-					{diff.newText.split("\n").map((line, idx) => (
+					{splitLines(normalizedNewText).map((line, idx) => (
 						<div
 							key={idx}
 							className="agent-client-diff-line agent-client-diff-line-added"
