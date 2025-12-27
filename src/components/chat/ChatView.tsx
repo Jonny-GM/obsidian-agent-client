@@ -169,6 +169,34 @@ function ChatComponent({
 		return custom?.displayName || custom?.id || activeId;
 	}, [session.agentId, plugin.settings]);
 
+	const connectionStatus = useMemo(() => {
+		if (session.state === "error") {
+			return {
+				label: "Bridge error",
+				variant: "error" as const,
+			};
+		}
+
+		if (session.state === "initializing") {
+			return {
+				label: "Bridge connecting",
+				variant: "connecting" as const,
+			};
+		}
+
+		if (session.state === "disconnected") {
+			return {
+				label: "Bridge disconnected",
+				variant: "disconnected" as const,
+			};
+		}
+
+		return {
+			label: "Bridge connected",
+			variant: "connected" as const,
+		};
+	}, [session.state]);
+
 	// ============================================================
 	// Callbacks
 	// ============================================================
@@ -490,6 +518,8 @@ function ChatComponent({
 		<div className="chat-view-container">
 			<ChatHeader
 				agentLabel={activeAgentLabel}
+				connectionStatus={connectionStatus.label}
+				connectionStatusVariant={connectionStatus.variant}
 				isUpdateAvailable={isUpdateAvailable}
 				onNewChat={() => void handleNewChat()}
 				onExportChat={() => void handleExportChat()}
@@ -500,6 +530,7 @@ function ChatComponent({
 				messages={messages}
 				isSending={isSending}
 				isSessionReady={isSessionReady}
+				sessionState={session.state}
 				agentLabel={activeAgentLabel}
 				errorInfo={errorInfo}
 				plugin={plugin}

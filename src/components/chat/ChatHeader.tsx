@@ -7,6 +7,10 @@ import { HeaderButton } from "./HeaderButton";
 export interface ChatHeaderProps {
 	/** Display name of the active agent */
 	agentLabel: string;
+	/** Connection status label */
+	connectionStatus: string;
+	/** Connection status style */
+	connectionStatusVariant: "connected" | "connecting" | "disconnected" | "error";
 	/** Whether a plugin update is available */
 	isUpdateAvailable: boolean;
 	/** Callback to create a new chat session */
@@ -27,6 +31,8 @@ export interface ChatHeaderProps {
  */
 export function ChatHeader({
 	agentLabel,
+	connectionStatus,
+	connectionStatusVariant,
 	isUpdateAvailable,
 	onNewChat,
 	onExportChat,
@@ -34,7 +40,14 @@ export function ChatHeader({
 }: ChatHeaderProps) {
 	return (
 		<div className="chat-view-header">
-			<h3 className="chat-view-header-title">{agentLabel}</h3>
+			<div className="chat-view-header-left">
+				<h3 className="chat-view-header-title">{agentLabel}</h3>
+				<span
+					className={`chat-view-header-status status-${connectionStatusVariant}`}
+				>
+					{connectionStatus}
+				</span>
+			</div>
 			{isUpdateAvailable && (
 				<p className="chat-view-header-update">Update available!</p>
 			)}

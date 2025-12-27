@@ -375,8 +375,45 @@ If your plugin does not need CSS, delete this file.
 	justify-content: space-between;
 }
 
+.chat-view-header-left {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+}
+
 .chat-view-header-title {
 	margin: 0 !important;
+}
+
+.chat-view-header-status {
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+
+.chat-view-header-status.status-connected {
+	background-color: rgba(var(--color-green-rgb), 0.15);
+	color: var(--color-green);
+}
+
+.chat-view-header-status.status-connecting {
+	background-color: rgba(var(--color-yellow-rgb), 0.2);
+	color: var(--color-yellow);
+}
+
+.chat-view-header-status.status-disconnected {
+	background-color: rgba(var(--color-red-rgb), 0.15);
+	color: var(--color-red);
+}
+
+.chat-view-header-status.status-error {
+	background-color: rgba(var(--color-red-rgb), 0.25);
+	color: var(--color-red);
 }
 
 .chat-view-header-update {

@@ -2,6 +2,7 @@ import * as React from "react";
 const { useRef, useState, useEffect, useCallback } = React;
 
 import type { ChatMessage } from "../../domain/models/chat-message";
+import type { SessionState } from "../../domain/models/chat-session";
 import type { IAcpClient } from "../../adapters/acp/acp.adapter";
 import type AgentClientPlugin from "../../plugin";
 import type { ChatView } from "./ChatView";
@@ -26,6 +27,8 @@ export interface ChatMessagesProps {
 	isSending: boolean;
 	/** Whether the session is ready for user input */
 	isSessionReady: boolean;
+	/** Current session state */
+	sessionState: SessionState;
 	/** Display name of the active agent */
 	agentLabel: string;
 	/** Error information (if any) */
@@ -59,6 +62,7 @@ export function ChatMessages({
 	messages,
 	isSending,
 	isSessionReady,
+	sessionState,
 	agentLabel,
 	errorInfo,
 	plugin,
@@ -140,9 +144,15 @@ export function ChatMessages({
 				</div>
 			) : messages.length === 0 ? (
 				<div className="chat-empty-state">
-					{!isSessionReady
+					{sessionState === "initializing"
 						? `Connecting to ${agentLabel}...`
-						: `Start a conversation with ${agentLabel}...`}
+						: sessionState === "disconnected"
+							? `Disconnected from ${agentLabel}.`
+							: sessionState === "error"
+								? `Connection error for ${agentLabel}.`
+								: isSessionReady
+									? `Start a conversation with ${agentLabel}...`
+									: `Connecting to ${agentLabel}...`}
 				</div>
 			) : (
 				<>
