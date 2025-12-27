@@ -330,7 +330,9 @@ function ChatComponent({
 			}
 
 			await chatRef.current.sendMessage(content, {
-				activeNote: autoMention.activeNote,
+				activeNote: settings.autoMentionActiveNote
+					? autoMention.activeNote
+					: null,
 				vaultBasePath:
 					(plugin.app.vault.adapter as VaultAdapterWithBasePath)
 						.basePath || "",

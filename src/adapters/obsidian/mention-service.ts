@@ -77,17 +77,28 @@ export class NoteMentionService {
 		this.logger.log("[DEBUG] Total folders indexed:", this.folders.length);
 
 		if (!query.trim()) {
-			this.logger.log("[DEBUG] Empty query, returning recent files");
-			// If no query, return recently modified files
+			this.logger.log(
+				"[DEBUG] Empty query, returning recent files and folders",
+			);
 			const recentFiles = this.files
 				.slice()
 				.sort((a, b) => (b.stat?.mtime || 0) - (a.stat?.mtime || 0))
-				.slice(0, 20);
-			this.logger.log(
-				"[DEBUG] Recent files:",
-				recentFiles.map((f) => f.name),
+				.slice(0, 10);
+			const recentFolders = this.folders
+				.slice()
+				.sort((a, b) => a.path.localeCompare(b.path))
+				.slice(0, 10);
+			const combined = [...recentFolders, ...recentFiles];
+			const unique = combined.filter(
+				(item, index, array) =>
+					array.findIndex((candidate) => candidate.path === item.path) ===
+					index,
 			);
-			return recentFiles;
+			this.logger.log(
+				"[DEBUG] Recent mentionables:",
+				unique.map((item) => item.path),
+			);
+			return unique.slice(0, 20);
 		}
 
 		this.logger.log("[DEBUG] Preparing fuzzy search for:", query.trim());
