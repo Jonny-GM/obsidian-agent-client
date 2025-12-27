@@ -71,12 +71,9 @@ export function detectMention(
 		}
 	} else {
 		// Simple @query format - use everything after @
-		// But end at whitespace (space, tab, newline)
-		if (
-			afterAt.includes(" ") ||
-			afterAt.includes("\t") ||
-			afterAt.includes("\n")
-		) {
+		// Allow spaces so users can type note names with spaces
+		// End only on hard line breaks or tabs
+		if (afterAt.includes("\t") || afterAt.includes("\n")) {
 			logger.log("[DEBUG] Mention ended by whitespace (simple format)");
 			return null;
 		}

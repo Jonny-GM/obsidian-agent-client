@@ -170,6 +170,7 @@ export class ObsidianVaultAdapter implements IVaultAccess {
 		this.detachEditorListener();
 
 		if (!view?.file) {
+			this.handleSelectionChange(null, null);
 			return;
 		}
 
@@ -177,7 +178,7 @@ export class ObsidianVaultAdapter implements IVaultAccess {
 		const filePath = file.path;
 
 		if (
-			this.lastSelectionKey &&
+			!this.lastSelectionKey ||
 			!this.lastSelectionKey.startsWith(`${filePath}:`)
 		) {
 			// Clear previous file selection when switching files
