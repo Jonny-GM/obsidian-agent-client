@@ -1,4 +1,5 @@
 import * as React from "react";
+import { diffLines, type Change } from "diff";
 const { useState, useMemo } = React;
 import type { MessageContent } from "../../domain/models/chat-message";
 import type { IAcpClient } from "../../adapters/acp/acp.adapter";
@@ -391,6 +392,62 @@ interface DiffRendererProps {
 	plugin: AgentClientPlugin;
 }
 
+type DiffLine = {
+	text: string;
+	type: "context" | "added" | "removed";
+};
+
+type DiffHunk = {
+	start: number;
+	end: number;
+};
+
+const DIFF_CONTEXT_LINES = 3;
+
+function splitLines(text: string): string[] {
+	const lines = text.split("\n");
+	if (lines.length > 0 && lines[lines.length - 1] === "") {
+		return lines.slice(0, -1);
+	}
+	return lines;
+}
+
+function buildDiffLines(oldText: string, newText: string): DiffLine[] {
+	const changes = diffLines(oldText, newText) as Change[];
+	const lines: DiffLine[] = [];
+
+	changes.forEach((change: Change) => {
+		const changeLines = splitLines(change.value);
+		const type: DiffLine["type"] = change.added
+			? "added"
+			: change.removed
+				? "removed"
+				: "context";
+
+		changeLines.forEach((line) => {
+			lines.push({ text: line, type });
+		});
+	});
+
+	return lines;
+}
+
+function buildHunks(lines: DiffLine[], contextLines: number): DiffHunk[] {
+	const hunks: DiffHunk[] = [];
+	lines.forEach((line, index) => {
+		if (line.type === "context") return;
+		const start = Math.max(0, index - contextLines);
+		const end = Math.min(lines.length - 1, index + contextLines);
+		const last = hunks[hunks.length - 1];
+		if (last && start <= last.end + 1) {
+			last.end = Math.max(last.end, end);
+			return;
+		}
+		hunks.push({ start, end });
+	});
+	return hunks;
+}
+
 function DiffRenderer({ diff, plugin }: DiffRendererProps) {
 	// Simple line-based diff
 	const renderDiff = () => {
@@ -420,41 +477,79 @@ function DiffRenderer({ diff, plugin }: DiffRendererProps) {
 			);
 		}
 
-		const oldLines = diff.oldText.split("\n");
-		const newLines = diff.newText.split("\n");
+		const diffLines = buildDiffLines(
+			diff.oldText ?? "",
+			diff.newText,
+		);
+		const hunks = buildHunks(diffLines, DIFF_CONTEXT_LINES);
 
-		// Simple comparison: show removed lines then added lines
+		if (hunks.length === 0) {
+			return (
+				<div className="agent-client-diff-line-info">
+					No changes detected
+				</div>
+			);
+		}
+
 		const elements: React.ReactElement[] = [];
+		let lastEnd = -1;
 
-		// Show removed lines
-		oldLines.forEach((line, idx) => {
-			elements.push(
-				<div
-					key={`old-${idx}`}
-					className="agent-client-diff-line agent-client-diff-line-removed"
-				>
-					<span className="agent-client-diff-line-marker">-</span>
-					<span className="agent-client-diff-line-content">
-						{line}
-					</span>
-				</div>,
-			);
+		hunks.forEach((hunk, hunkIndex) => {
+			if (hunk.start > lastEnd + 1) {
+				const hiddenCount = hunk.start - lastEnd - 1;
+				elements.push(
+					<div
+						key={`gap-${hunkIndex}`}
+						className="agent-client-diff-line-info"
+					>
+						{hiddenCount} unchanged line
+						{hiddenCount === 1 ? "" : "s"} hidden
+					</div>,
+				);
+			}
+
+			for (let index = hunk.start; index <= hunk.end; index += 1) {
+				const line = diffLines[index];
+				const marker =
+					line.type === "added"
+						? "+"
+						: line.type === "removed"
+							? "-"
+							: " ";
+				const className =
+					line.type === "added"
+						? "agent-client-diff-line agent-client-diff-line-added"
+						: line.type === "removed"
+							? "agent-client-diff-line agent-client-diff-line-removed"
+							: "agent-client-diff-line agent-client-diff-line-context";
+
+				elements.push(
+					<div key={`line-${index}`} className={className}>
+						<span className="agent-client-diff-line-marker">
+							{marker}
+						</span>
+						<span className="agent-client-diff-line-content">
+							{line.text}
+						</span>
+					</div>,
+				);
+			}
+
+			lastEnd = hunk.end;
 		});
 
-		// Show added lines
-		newLines.forEach((line, idx) => {
+		if (lastEnd < diffLines.length - 1) {
+			const hiddenCount = diffLines.length - lastEnd - 1;
 			elements.push(
 				<div
-					key={`new-${idx}`}
-					className="agent-client-diff-line agent-client-diff-line-added"
+					key="gap-end"
+					className="agent-client-diff-line-info"
 				>
-					<span className="agent-client-diff-line-marker">+</span>
-					<span className="agent-client-diff-line-content">
-						{line}
-					</span>
+					{hiddenCount} unchanged line
+					{hiddenCount === 1 ? "" : "s"} hidden
 				</div>,
 			);
-		});
+		}
 
 		return elements;
 	};
