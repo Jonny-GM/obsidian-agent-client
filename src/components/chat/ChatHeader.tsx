@@ -17,6 +17,8 @@ export interface ChatHeaderProps {
 	reconnectStatus: ReconnectStatus;
 	/** Whether ACP bridge is enabled */
 	isBridgeEnabled: boolean;
+	/** Whether the session will connect on demand (e.g., mobile bridge) */
+	canStartSession?: boolean;
 	/** Callback to create a new chat session */
 	onNewChat: () => void;
 	/** Callback to export the chat */
@@ -43,6 +45,7 @@ export function ChatHeader({
 	sessionState,
 	reconnectStatus,
 	isBridgeEnabled,
+	canStartSession = false,
 	onNewChat,
 	onExportChat,
 	onOpenSettings,
@@ -50,6 +53,13 @@ export function ChatHeader({
 	onCancelReconnect,
 }: ChatHeaderProps) {
 	const statusTone = (() => {
+		if (
+			isBridgeEnabled &&
+			canStartSession &&
+			sessionState === "disconnected"
+		) {
+			return "info";
+		}
 		if (sessionState === "ready" || sessionState === "busy") {
 			return "success";
 		}
@@ -80,10 +90,24 @@ export function ChatHeader({
 					return "Disconnected";
 			}
 		})();
+		if (
+			isBridgeEnabled &&
+			canStartSession &&
+			sessionState === "disconnected"
+		) {
+			return "Bridge Ready";
+		}
 		return isBridgeEnabled ? `Bridge ${baseLabel}` : baseLabel;
 	})();
 
 	const statusDetail = (() => {
+		if (
+			isBridgeEnabled &&
+			canStartSession &&
+			sessionState === "disconnected"
+		) {
+			return "Send a message to connect.";
+		}
 		if (reconnectStatus.state === "scheduled") {
 			return `Retrying in ${reconnectStatus.secondsRemaining}s (attempt ${reconnectStatus.attempt})`;
 		}

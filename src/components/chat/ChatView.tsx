@@ -372,7 +372,7 @@ function ChatComponent({
 	// ============================================================
 	// Initialize session on mount or when agent changes
 	useEffect(() => {
-		if (requiresBridgeOnMobile || Platform.isMobileApp) {
+		if (requiresBridgeOnMobile) {
 			return;
 		}
 
@@ -606,6 +606,7 @@ function ChatComponent({
 				sessionState={session.state}
 				reconnectStatus={reconnectStatus}
 				isBridgeEnabled={isBridgeEnabled}
+				canStartSession={canStartSessionOnMobile}
 				onNewChat={() => void handleNewChat()}
 				onExportChat={() => void handleExportChat()}
 				onOpenSettings={handleOpenSettings}
