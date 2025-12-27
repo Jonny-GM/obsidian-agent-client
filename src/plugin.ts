@@ -146,6 +146,7 @@ export default class AgentClientPlugin extends Plugin {
 	private instanceNumber: number;
 	private onloadStartedAt: number | null = null;
 	private heartbeatIntervalMs = 30000;
+	private lastHeartbeatAt: number | null = null;
 
 	// Active ACP adapter instance (shared across use cases)
 	acpAdapter: import("./adapters/acp/acp.adapter").AcpAdapter | null = null;
@@ -316,11 +317,13 @@ export default class AgentClientPlugin extends Plugin {
 		if (this.settings.debugMode) {
 			this.registerInterval(
 				window.setInterval(() => {
+					this.lastHeartbeatAt = Date.now();
 					const activeLeaf = this.app.workspace.activeLeaf;
 					const activeViewType = activeLeaf?.view?.getViewType();
 					this.logger?.log("[Agent Client] heartbeat", {
 						instanceId: this.instanceId,
 						instanceNumber: this.instanceNumber,
+						timestamp: new Date().toISOString(),
 						visibilityState: document.visibilityState,
 						activeViewType,
 						agentClientLeaves:
@@ -531,6 +534,7 @@ export default class AgentClientPlugin extends Plugin {
 		this.registerDomEvent(document, "visibilitychange", () => {
 			this.logger?.log("[Agent Client] document visibilitychange", {
 				visibilityState: document.visibilityState,
+				lastHeartbeatAt: this.lastHeartbeatAt,
 			});
 		});
 
