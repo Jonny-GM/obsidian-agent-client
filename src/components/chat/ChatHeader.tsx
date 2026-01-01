@@ -23,6 +23,8 @@ export interface ChatHeaderProps {
 	onNewChat: () => void;
 	/** Callback to export the chat */
 	onExportChat: () => void;
+	/** Callback to open chat history */
+	onOpenHistory: () => void;
 	/** Callback to open settings */
 	onOpenSettings: () => void;
 	/** Callback to reconnect immediately */
@@ -48,6 +50,7 @@ export function ChatHeader({
 	canStartSession = false,
 	onNewChat,
 	onExportChat,
+	onOpenHistory,
 	onOpenSettings,
 	onReconnectNow,
 	onCancelReconnect,
@@ -174,6 +177,11 @@ export function ChatHeader({
 					iconName="plus"
 					tooltip="New chat"
 					onClick={onNewChat}
+				/>
+				<HeaderButton
+					iconName="clock"
+					tooltip="Chat history"
+					onClick={onOpenHistory}
 				/>
 				<HeaderButton
 					iconName="save"

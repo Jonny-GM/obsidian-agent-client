@@ -71,6 +71,11 @@ export interface AgentClientPluginSettings {
 		imageLocation: "obsidian" | "custom" | "base64";
 		imageCustomFolder: string;
 	};
+	historySettings: {
+		defaultFolder: string;
+		autoSave: boolean;
+		autoSaveDebounceMs: number;
+	};
 	// WSL settings (Windows only)
 	windowsWslMode: boolean;
 	windowsWslDistribution?: string;
@@ -133,6 +138,11 @@ const DEFAULT_SETTINGS: AgentClientPluginSettings = {
 		includeImages: true,
 		imageLocation: "obsidian",
 		imageCustomFolder: "Agent Client",
+	},
+	historySettings: {
+		defaultFolder: "Agent Client/Chat History",
+		autoSave: true,
+		autoSaveDebounceMs: 800,
 	},
 	windowsWslMode: false,
 	windowsWslDistribution: undefined,
@@ -857,6 +867,30 @@ export default class AgentClientPlugin extends Plugin {
 					};
 				}
 				return DEFAULT_SETTINGS.exportSettings;
+			})(),
+			historySettings: (() => {
+				const rawHistory = rawSettings.historySettings as
+					| Record<string, unknown>
+					| null
+					| undefined;
+				if (rawHistory && typeof rawHistory === "object") {
+					return {
+						defaultFolder:
+							typeof rawHistory.defaultFolder === "string"
+								? rawHistory.defaultFolder
+								: DEFAULT_SETTINGS.historySettings.defaultFolder,
+						autoSave:
+							typeof rawHistory.autoSave === "boolean"
+								? rawHistory.autoSave
+								: DEFAULT_SETTINGS.historySettings.autoSave,
+						autoSaveDebounceMs:
+							typeof rawHistory.autoSaveDebounceMs === "number"
+								? rawHistory.autoSaveDebounceMs
+								: DEFAULT_SETTINGS.historySettings
+										.autoSaveDebounceMs,
+					};
+				}
+				return DEFAULT_SETTINGS.historySettings;
 			})(),
 			windowsWslMode:
 				typeof rawSettings.windowsWslMode === "boolean"

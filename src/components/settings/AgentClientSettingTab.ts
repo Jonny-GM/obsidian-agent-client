@@ -344,6 +344,58 @@ export class AgentClientSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		new Setting(containerEl).setName("History").setHeading();
+
+		new Setting(containerEl)
+			.setName("History folder")
+			.setDesc("Folder where chat history snapshots are saved")
+			.addText((text) =>
+				text
+					.setPlaceholder("Agent Client/Chat History")
+					.setValue(
+						this.plugin.settings.historySettings.defaultFolder,
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.historySettings.defaultFolder =
+							value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-save chat history")
+			.setDesc("Save chats continuously for history and resume")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.historySettings.autoSave)
+					.onChange(async (value) => {
+						this.plugin.settings.historySettings.autoSave = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-save debounce (ms)")
+			.setDesc("Delay before writing chat history updates to disk")
+			.addText((text) =>
+				text
+					.setPlaceholder("800")
+					.setValue(
+						String(
+							this.plugin.settings.historySettings
+								.autoSaveDebounceMs,
+						),
+					)
+					.onChange(async (value) => {
+						const parsed = Number(value);
+						this.plugin.settings.historySettings.autoSaveDebounceMs =
+							Number.isFinite(parsed) && parsed >= 0
+								? parsed
+								: 800;
+						await this.plugin.saveSettings();
+					}),
+			);
+
 		new Setting(containerEl).setName("Developer").setHeading();
 
 		new Setting(containerEl)
