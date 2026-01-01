@@ -69,6 +69,11 @@ export interface UseChatReturn {
 	clearError: () => void;
 
 	/**
+	 * Replace the current message history.
+	 */
+	replaceMessages: (messages: ChatMessage[]) => void;
+
+	/**
 	 * Callback to add a new message.
 	 * Used by AcpAdapter when receiving agent messages.
 	 */
@@ -413,6 +418,16 @@ export function useChat(
 	}, []);
 
 	/**
+	 * Replace the entire message list.
+	 */
+	const replaceMessages = useCallback((nextMessages: ChatMessage[]): void => {
+		setMessages(nextMessages);
+		setIsSending(false);
+		setLastUserMessage(null);
+		setErrorInfo(null);
+	}, []);
+
+	/**
 	 * Check if paths should be converted to WSL format.
 	 */
 	const shouldConvertToWsl = useMemo(() => {
@@ -547,6 +562,7 @@ export function useChat(
 		sendMessage,
 		clearMessages,
 		clearError,
+		replaceMessages,
 		addMessage,
 		updateLastMessage,
 		updateMessage,

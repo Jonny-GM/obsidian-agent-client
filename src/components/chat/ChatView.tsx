@@ -9,6 +9,7 @@ import type AgentClientPlugin from "../../plugin";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatInput } from "./ChatInput";
+import { ChatHistoryPanel } from "./ChatHistoryPanel";
 
 // Service imports
 import { NoteMentionService } from "../../adapters/obsidian/mention-service";
@@ -16,6 +17,10 @@ import { NoteMentionService } from "../../adapters/obsidian/mention-service";
 // Utility imports
 import { Logger } from "../../shared/logger";
 import { ChatExporter } from "../../shared/chat-exporter";
+import {
+	ChatHistoryStore,
+	deserializeMessages,
+} from "../../shared/chat-history-store";
 
 // Adapter imports
 import { AcpAdapter, type IAcpClient } from "../../adapters/acp/acp.adapter";
@@ -30,6 +35,7 @@ import { useAgentSession } from "../../hooks/useAgentSession";
 import { useChat } from "../../hooks/useChat";
 import { usePermission } from "../../hooks/usePermission";
 import { useAutoExport } from "../../hooks/useAutoExport";
+import type { ChatHistoryEntry } from "../../domain/models/chat-history";
 
 // Type definitions for Obsidian internal APIs
 interface VaultAdapterWithBasePath {
@@ -109,6 +115,10 @@ function ChatComponent({
 		() => new NoteMentionService(plugin),
 		[plugin],
 	);
+	const chatHistoryStore = useMemo(
+		() => new ChatHistoryStore(plugin),
+		[plugin],
+	);
 
 	// Cleanup NoteMentionService when component unmounts
 	useEffect(() => {
@@ -182,9 +192,17 @@ function ChatComponent({
 	// ============================================================
 	const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
 	const [restoredMessage, setRestoredMessage] = useState<string | null>(null);
+	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+	const [historyEntries, setHistoryEntries] = useState<ChatHistoryEntry[]>(
+		[],
+	);
+	const [chatId, setChatId] = useState<string>(() => crypto.randomUUID());
+	const [chatStartedAt, setChatStartedAt] = useState(() => new Date());
+	const [chatHistoryPath, setChatHistoryPath] = useState<string | null>(null);
 	const pendingSessionResolver = useRef<
 		((sessionId: string | null) => void) | null
 	>(null);
+	const historySaveTimeoutRef = useRef<number | null>(null);
 
 	// ============================================================
 	// Computed Values
@@ -266,6 +284,9 @@ function ChatComponent({
 			autoMention.toggle(false);
 			chat.clearMessages();
 			await agentSession.restartSession();
+			setChatId(crypto.randomUUID());
+			setChatStartedAt(new Date());
+			setChatHistoryPath(null);
 		},
 		[
 			messages,
@@ -307,6 +328,57 @@ function ChatComponent({
 		appWithSettings.setting.open();
 		appWithSettings.setting.openTabById(plugin.manifest.id);
 	}, [plugin]);
+
+	const refreshHistory = useCallback(async () => {
+		const entries = await chatHistoryStore.listChats();
+		setHistoryEntries(entries);
+	}, [chatHistoryStore]);
+
+	const handleOpenHistory = useCallback(() => {
+		setIsHistoryOpen(true);
+		void refreshHistory();
+	}, [refreshHistory]);
+
+	const handleCloseHistory = useCallback(() => {
+		setIsHistoryOpen(false);
+	}, []);
+
+	const handleLoadHistory = useCallback(
+		async (entry: ChatHistoryEntry) => {
+			const record = await chatHistoryStore.loadChat(entry.path);
+			if (!record) {
+				new Notice("[Agent Client] Failed to load chat history");
+				return;
+			}
+			chat.replaceMessages(deserializeMessages(record.messages));
+			setChatId(record.chatId);
+			setChatStartedAt(new Date(record.createdAt));
+			setChatHistoryPath(entry.path);
+			setIsHistoryOpen(false);
+		},
+		[chat, chatHistoryStore],
+	);
+
+	const handleResumeHistory = useCallback(
+		async (entry: ChatHistoryEntry) => {
+			const record = await chatHistoryStore.loadChat(entry.path);
+			if (!record) {
+				new Notice("[Agent Client] Failed to load chat history");
+				return;
+			}
+			chat.replaceMessages(deserializeMessages(record.messages));
+			setChatId(record.chatId);
+			setChatStartedAt(new Date(record.createdAt));
+			setChatHistoryPath(entry.path);
+
+			if (entry.agentId !== session.agentId) {
+				await agentSession.switchAgent(entry.agentId);
+			}
+			await agentSession.restartSession();
+			setIsHistoryOpen(false);
+		},
+		[agentSession, chat, chatHistoryStore, session.agentId],
+	);
 
 	const handleSendMessage = useCallback(
 		async (
@@ -424,6 +496,12 @@ function ChatComponent({
 	}, [session.sessionId, session.state]);
 
 	useEffect(() => {
+		if (messages.length === 0 && session.sessionId) {
+			setChatStartedAt(session.createdAt);
+		}
+	}, [messages.length, session.createdAt, session.sessionId]);
+
+	useEffect(() => {
 		if (requiresBridgeOnMobile) {
 			new Notice(
 				"[Agent Client] ACP bridge is required on mobile. Enable it in settings.",
@@ -447,6 +525,64 @@ function ChatComponent({
 		session.agentId,
 		session.sessionId,
 		session.state,
+	]);
+
+	useEffect(() => {
+		if (!settings.historySettings.autoSave) {
+			return;
+		}
+		if (messages.length === 0) {
+			return;
+		}
+		if (historySaveTimeoutRef.current) {
+			window.clearTimeout(historySaveTimeoutRef.current);
+		}
+		historySaveTimeoutRef.current = window.setTimeout(() => {
+			void (async () => {
+				const result = await chatHistoryStore.saveChat(
+					session,
+					messages,
+					chatId,
+					chatStartedAt,
+					chatHistoryPath,
+				);
+				if (result) {
+					setChatHistoryPath(result.path);
+					setHistoryEntries((prev) => {
+						const next = prev.filter(
+							(entry) => entry.path !== result.path,
+						);
+						next.unshift({
+							chatId: result.record.chatId,
+							path: result.path,
+							agentId: result.record.agentId,
+							agentDisplayName: result.record.agentDisplayName,
+							createdAt: new Date(result.record.createdAt),
+							updatedAt: new Date(result.record.updatedAt),
+							messageCount: result.record.messageCount,
+							title: result.record.title,
+							isConflict: result.path.includes("(conflict"),
+						});
+						return next;
+					});
+				}
+			})();
+		}, settings.historySettings.autoSaveDebounceMs);
+
+		return () => {
+			if (historySaveTimeoutRef.current) {
+				window.clearTimeout(historySaveTimeoutRef.current);
+			}
+		};
+	}, [
+		chatHistoryPath,
+		chatHistoryStore,
+		chatId,
+		chatStartedAt,
+		messages,
+		session,
+		settings.historySettings.autoSave,
+		settings.historySettings.autoSaveDebounceMs,
 	]);
 
 	// Refs for cleanup (to access latest values in cleanup function)
@@ -678,10 +814,20 @@ function ChatComponent({
 				isBridgeEnabled={isBridgeEnabled}
 				canStartSession={canStartSessionOnMobile}
 				onNewChat={() => void handleNewChat()}
+				onOpenHistory={handleOpenHistory}
 				onExportChat={() => void handleExportChat()}
 				onOpenSettings={handleOpenSettings}
 				onReconnectNow={() => void agentSession.reconnectNow()}
 				onCancelReconnect={agentSession.cancelReconnect}
+			/>
+
+			<ChatHistoryPanel
+				isOpen={isHistoryOpen}
+				entries={historyEntries}
+				onClose={handleCloseHistory}
+				onRefresh={refreshHistory}
+				onLoad={handleLoadHistory}
+				onResume={handleResumeHistory}
 			/>
 
 			<ChatMessages
