@@ -11,6 +11,8 @@ interface MessageRendererProps {
 	message: ChatMessage;
 	plugin: AgentClientPlugin;
 	acpClient?: IAcpClient;
+	isStreaming?: boolean;
+	isLatestMessage?: boolean;
 	/** Callback to approve a permission request */
 	onApprovePermission?: (
 		requestId: string,
@@ -60,6 +62,8 @@ export function MessageRenderer({
 	message,
 	plugin,
 	acpClient,
+	isStreaming = false,
+	isLatestMessage = false,
 	onApprovePermission,
 }: MessageRendererProps) {
 	const groups = groupContent(message.content);
@@ -84,6 +88,8 @@ export function MessageRenderer({
 									messageId={message.id}
 									messageRole={message.role}
 									acpClient={acpClient}
+									isStreaming={isStreaming}
+									isLatestMessage={isLatestMessage}
 									onApprovePermission={onApprovePermission}
 								/>
 							))}
@@ -99,6 +105,8 @@ export function MessageRenderer({
 								messageId={message.id}
 								messageRole={message.role}
 								acpClient={acpClient}
+								isStreaming={isStreaming}
+								isLatestMessage={isLatestMessage}
 								onApprovePermission={onApprovePermission}
 							/>
 						</div>

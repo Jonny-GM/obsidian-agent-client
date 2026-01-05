@@ -14,6 +14,8 @@ interface MessageContentRendererProps {
 	messageId?: string;
 	messageRole?: "user" | "assistant";
 	acpClient?: IAcpClient;
+	isStreaming?: boolean;
+	isLatestMessage?: boolean;
 	/** Callback to approve a permission request */
 	onApprovePermission?: (
 		requestId: string,
@@ -27,8 +29,13 @@ export function MessageContentRenderer({
 	messageId,
 	messageRole,
 	acpClient,
+	isStreaming = false,
+	isLatestMessage = false,
 	onApprovePermission,
 }: MessageContentRendererProps) {
+	const shouldAutoExpandThoughts =
+		isStreaming && isLatestMessage && messageRole === "assistant";
+
 	switch (content.type) {
 		case "text":
 			// User messages: render with mention support
@@ -51,7 +58,14 @@ export function MessageContentRenderer({
 			);
 
 		case "agent_thought":
-			return <CollapsibleThought text={content.text} plugin={plugin} />;
+			return (
+				<CollapsibleThought
+					text={content.text}
+					plugin={plugin}
+					isStreaming={isStreaming}
+					autoExpand={shouldAutoExpandThoughts}
+				/>
+			);
 
 		case "tool_call":
 			return (
