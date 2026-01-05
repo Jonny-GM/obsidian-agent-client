@@ -7,6 +7,7 @@ import {
 	WorkspaceLeaf,
 	requestUrl,
 } from "obsidian";
+import AdmZip from "adm-zip";
 import * as semver from "semver";
 import { ChatView, VIEW_TYPE_CHAT } from "./components/chat/ChatView";
 import {
@@ -1105,6 +1106,10 @@ export default class AgentClientPlugin extends Plugin {
 		return response.text;
 	}
 
+	private bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
+		return Uint8Array.from(buffer).buffer;
+	}
+
 	private getPluginFolderPath(): string {
 		const vaultConfigDir = this.app.vault.configDir ?? ".obsidian";
 		return `${vaultConfigDir}/plugins/${this.manifest.id}`;
@@ -1152,15 +1157,21 @@ export default class AgentClientPlugin extends Plugin {
 		owner: string,
 		repo: string,
 	): Promise<string[]> {
-		const response = await requestUrl({
-			url: `https://api.github.com/repos/${owner}/${repo}`,
-		});
-		const data = response.json as { default_branch?: string };
-		const branches = new Set<string>();
-		if (data.default_branch) {
-			branches.add(data.default_branch);
+		const branches = new Set<string>(["dev"]);
+		try {
+			const response = await requestUrl({
+				url: `https://api.github.com/repos/${owner}/${repo}`,
+			});
+			const data = response.json as { default_branch?: string };
+			if (data.default_branch === "dev") {
+				branches.add(data.default_branch);
+			}
+		} catch (error) {
+			this.logger?.warn(
+				"[Agent Client] Failed to fetch update branches; defaulting to dev.",
+				error,
+			);
 		}
-		branches.add("dev");
 		return Array.from(branches);
 	}
 
@@ -1184,8 +1195,71 @@ export default class AgentClientPlugin extends Plugin {
 		return artifact?.archive_download_url ?? null;
 	}
 
+	private getArtifactEntry(
+		zip: AdmZip,
+		filename: string,
+	): AdmZip.IZipEntry | null {
+		return (
+			zip
+				.getEntries()
+				.find(
+					(entry: AdmZip.IZipEntry) =>
+						!entry.isDirectory &&
+						entry.entryName.split("/").pop() === filename,
+				) ?? null
+		);
+	}
+
+	private async installCiArtifact(artifactUrl: string): Promise<void> {
+		const response = await requestUrl({
+			url: artifactUrl,
+			headers: {
+				Accept: "application/vnd.github+json",
+			},
+		});
+		if (!response.arrayBuffer) {
+			throw new Error(
+				`Failed to download CI artifact: ${artifactUrl}`,
+			);
+		}
+
+		const zip = new AdmZip(Buffer.from(response.arrayBuffer));
+		const mainEntry = this.getArtifactEntry(zip, "main.js");
+		const manifestEntry = this.getArtifactEntry(zip, "manifest.json");
+		const stylesEntry = this.getArtifactEntry(zip, "styles.css");
+
+		if (!mainEntry || !manifestEntry || !stylesEntry) {
+			throw new Error(
+				"CI artifact is missing required plugin files.",
+			);
+		}
+
+		const mainBuffer = this.bufferToArrayBuffer(
+			mainEntry.getData(),
+		);
+		const manifestText = manifestEntry.getData().toString("utf8");
+		const stylesBuffer = this.bufferToArrayBuffer(
+			stylesEntry.getData(),
+		);
+
+		const adapter = this.app.vault.adapter;
+		const pluginFolder = this.getPluginFolderPath();
+		if (!(await adapter.exists(pluginFolder))) {
+			await adapter.mkdir(pluginFolder);
+		}
+
+		await Promise.all([
+			adapter.writeBinary(`${pluginFolder}/main.js`, mainBuffer),
+			adapter.write(`${pluginFolder}/manifest.json`, manifestText),
+			adapter.writeBinary(
+				`${pluginFolder}/styles.css`,
+				stylesBuffer,
+			),
+		]);
+	}
+
 	private getUpdateRepo(): { owner: string; repo: string } {
-		const fallbackOwner = "RAIT-09";
+		const fallbackOwner = this.manifest.author || "RAIT-09";
 		const fallbackRepo = "obsidian-agent-client";
 		const authorUrl = this.manifest.authorUrl;
 		if (!authorUrl) {
@@ -1194,9 +1268,14 @@ export default class AgentClientPlugin extends Plugin {
 
 		try {
 			const url = new URL(authorUrl);
-			const owner = url.pathname.replace(/^\/+/, "").split("/")[0];
+			const pathParts = url.pathname
+				.replace(/^\/+/, "")
+				.split("/")
+				.filter(Boolean);
+			const owner = pathParts[0];
+			const repo = pathParts[1] ?? fallbackRepo;
 			if (owner) {
-				return { owner, repo: fallbackRepo };
+				return { owner, repo };
 			}
 		} catch (error) {
 			this.logger?.error(
@@ -1319,10 +1398,9 @@ export default class AgentClientPlugin extends Plugin {
 		}
 
 		if (update.source === "ci") {
-			const url = update.ciRunUrl || update.ciArtifactUrl;
-			if (url) {
-				window.open(url);
-				return "opened";
+			if (update.ciArtifactUrl) {
+				await this.installCiArtifact(update.ciArtifactUrl);
+				return "installed";
 			}
 			throw new Error("CI update is missing a download URL.");
 		}
