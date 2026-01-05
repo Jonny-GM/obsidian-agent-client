@@ -150,12 +150,14 @@ export function ChatMessages({
 				</div>
 			) : (
 				<>
-					{messages.map((message) => (
+					{messages.map((message, index) => (
 						<MessageRenderer
 							key={message.id}
 							message={message}
 							plugin={plugin}
 							acpClient={acpClient}
+							isStreaming={isSending}
+							isLatestMessage={index === messages.length - 1}
 							onApprovePermission={onApprovePermission}
 						/>
 					))}
