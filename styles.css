@@ -506,6 +506,15 @@ If your plugin does not need CSS, delete this file.
 	cursor: pointer;
 }
 
+.agent-client-chat-history-icon-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+}
+
 .agent-client-chat-history-button:hover {
 	background-color: var(--background-modifier-hover);
 }

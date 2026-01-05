@@ -334,30 +334,15 @@ function ChatComponent({
 		setHistoryEntries(entries);
 	}, [chatHistoryStore]);
 
-	const handleOpenHistory = useCallback(() => {
-		setIsHistoryOpen(true);
-		void refreshHistory();
-	}, [refreshHistory]);
-
-	const handleCloseHistory = useCallback(() => {
-		setIsHistoryOpen(false);
-	}, []);
-
-	const handleLoadHistory = useCallback(
-		async (entry: ChatHistoryEntry) => {
-			const record = await chatHistoryStore.loadChat(entry.path);
-			if (!record) {
-				new Notice("[Agent Client] Failed to load chat history");
-				return;
+	const handleToggleHistory = useCallback(() => {
+		setIsHistoryOpen((prev) => {
+			const next = !prev;
+			if (next) {
+				void refreshHistory();
 			}
-			chat.replaceMessages(deserializeMessages(record.messages));
-			setChatId(record.chatId);
-			setChatStartedAt(new Date(record.createdAt));
-			setChatHistoryPath(entry.path);
-			setIsHistoryOpen(false);
-		},
-		[chat, chatHistoryStore],
-	);
+			return next;
+		});
+	}, [refreshHistory]);
 
 	const handleResumeHistory = useCallback(
 		async (entry: ChatHistoryEntry) => {
@@ -816,7 +801,7 @@ function ChatComponent({
 				isBridgeEnabled={isBridgeEnabled}
 				canStartSession={canStartSessionOnMobile}
 				onNewChat={() => void handleNewChat()}
-				onOpenHistory={handleOpenHistory}
+				onOpenHistory={handleToggleHistory}
 				onExportChat={() => void handleExportChat()}
 				onOpenSettings={handleOpenSettings}
 				onReconnectNow={() => void agentSession.reconnectNow()}
@@ -826,9 +811,6 @@ function ChatComponent({
 			<ChatHistoryPanel
 				isOpen={isHistoryOpen}
 				entries={historyEntries}
-				onClose={handleCloseHistory}
-				onRefresh={refreshHistory}
-				onLoad={handleLoadHistory}
 				onResume={handleResumeHistory}
 			/>
 
