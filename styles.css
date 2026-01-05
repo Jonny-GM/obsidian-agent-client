@@ -450,6 +450,9 @@ If your plugin does not need CSS, delete this file.
 }
 
 .agent-client-chat-view-header-update {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
 	margin: 0 !important;
 	padding: 2px 8px;
 	font-size: 11px;

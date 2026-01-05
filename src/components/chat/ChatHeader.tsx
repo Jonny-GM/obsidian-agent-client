@@ -11,6 +11,8 @@ export interface ChatHeaderProps {
 	agentLabel: string;
 	/** Whether a plugin update is available */
 	isUpdateAvailable: boolean;
+	/** Whether an update is being installed */
+	isUpdating: boolean;
 	/** Current session state */
 	sessionState: SessionState;
 	/** Current reconnect status */
@@ -31,6 +33,8 @@ export interface ChatHeaderProps {
 	onReconnectNow: () => void;
 	/** Callback to cancel reconnect */
 	onCancelReconnect: () => void;
+	/** Callback to update the plugin */
+	onUpdatePlugin: () => void;
 }
 
 /**
@@ -44,6 +48,7 @@ export interface ChatHeaderProps {
 export function ChatHeader({
 	agentLabel,
 	isUpdateAvailable,
+	isUpdating,
 	sessionState,
 	reconnectStatus,
 	isBridgeEnabled,
@@ -54,6 +59,7 @@ export function ChatHeader({
 	onOpenSettings,
 	onReconnectNow,
 	onCancelReconnect,
+	onUpdatePlugin,
 }: ChatHeaderProps) {
 	const statusTone = (() => {
 		if (isBridgeEnabled && reconnectStatus.state === "connecting") {
@@ -167,9 +173,17 @@ export function ChatHeader({
 					</button>
 				)}
 				{isUpdateAvailable && (
-					<p className="agent-client-chat-view-header-update">
-						Update available!
-					</p>
+					<div className="agent-client-chat-view-header-update">
+						<span>Update available!</span>
+						<button
+							type="button"
+							className="agent-client-chat-view-header-status-action"
+							onClick={onUpdatePlugin}
+							disabled={isUpdating}
+						>
+							{isUpdating ? "Updating..." : "Update"}
+						</button>
+					</div>
 				)}
 			</div>
 			<div className="agent-client-chat-view-header-actions">
