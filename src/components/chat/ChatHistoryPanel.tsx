@@ -1,23 +1,18 @@
 import * as React from "react";
+import { setIcon } from "obsidian";
 import type { ChatHistoryEntry } from "../../domain/models/chat-history";
 
-const { useMemo, useState } = React;
+const { useMemo, useState, useEffect, useRef } = React;
 
 export interface ChatHistoryPanelProps {
 	isOpen: boolean;
 	entries: ChatHistoryEntry[];
-	onClose: () => void;
-	onRefresh: () => void;
-	onLoad: (entry: ChatHistoryEntry) => void;
 	onResume: (entry: ChatHistoryEntry) => void;
 }
 
 export function ChatHistoryPanel({
 	isOpen,
 	entries,
-	onClose,
-	onRefresh,
-	onLoad,
 	onResume,
 }: ChatHistoryPanelProps) {
 	const [query, setQuery] = useState("");
@@ -55,22 +50,6 @@ export function ChatHistoryPanel({
 						Load or resume previous sessions
 					</p>
 				</div>
-				<div className="agent-client-chat-history-header-actions">
-					<button
-						type="button"
-						className="agent-client-chat-history-button"
-						onClick={onRefresh}
-					>
-						Refresh
-					</button>
-					<button
-						type="button"
-						className="agent-client-chat-history-button agent-client-chat-history-button-muted"
-						onClick={onClose}
-					>
-						Close
-					</button>
-				</div>
 			</div>
 			<div className="agent-client-chat-history-search">
 				<input
@@ -87,51 +66,63 @@ export function ChatHistoryPanel({
 					</div>
 				) : (
 					filteredEntries.map((entry) => (
-						<div
+						<ChatHistoryEntryRow
 							key={entry.path}
-							className="agent-client-chat-history-item"
-						>
-							<div className="agent-client-chat-history-item-info">
-								<div className="agent-client-chat-history-item-title">
-									{entry.title || "Untitled chat"}
-								</div>
-								<div className="agent-client-chat-history-item-meta">
-									<span>{entry.agentDisplayName}</span>
-									<span>•</span>
-									<span>
-										{entry.updatedAt.toLocaleString()}
-									</span>
-									<span>•</span>
-									<span>{entry.messageCount} messages</span>
-									{entry.isConflict && (
-										<>
-											<span>•</span>
-											<span className="agent-client-chat-history-conflict">
-												Conflict
-											</span>
-										</>
-									)}
-								</div>
-							</div>
-							<div className="agent-client-chat-history-item-actions">
-								<button
-									type="button"
-									className="agent-client-chat-history-button"
-									onClick={() => onLoad(entry)}
-								>
-									Load
-								</button>
-								<button
-									type="button"
-									className="agent-client-chat-history-button"
-									onClick={() => onResume(entry)}
-								>
-									Resume
-								</button>
-							</div>
-						</div>
+							entry={entry}
+							onResume={onResume}
+						/>
 					))
 				)}
+			</div>
+		</div>
+	);
+}
+
+interface ChatHistoryEntryRowProps {
+	entry: ChatHistoryEntry;
+	onResume: (entry: ChatHistoryEntry) => void;
+}
+
+function ChatHistoryEntryRow({ entry, onResume }: ChatHistoryEntryRowProps) {
+	const resumeButtonRef = useRef<HTMLButtonElement>(null);
+
+	useEffect(() => {
+		if (resumeButtonRef.current) {
+			setIcon(resumeButtonRef.current, "arrow-right");
+		}
+	}, []);
+
+	return (
+		<div key={entry.path} className="agent-client-chat-history-item">
+			<div className="agent-client-chat-history-item-info">
+				<div className="agent-client-chat-history-item-title">
+					{entry.title || "Untitled chat"}
+				</div>
+				<div className="agent-client-chat-history-item-meta">
+					<span>{entry.agentDisplayName}</span>
+					<span>•</span>
+					<span>{entry.updatedAt.toLocaleString()}</span>
+					<span>•</span>
+					<span>{entry.messageCount} messages</span>
+					{entry.isConflict && (
+						<>
+							<span>•</span>
+							<span className="agent-client-chat-history-conflict">
+								Conflict
+							</span>
+						</>
+					)}
+				</div>
+			</div>
+			<div className="agent-client-chat-history-item-actions">
+				<button
+					ref={resumeButtonRef}
+					type="button"
+					className="agent-client-chat-history-button agent-client-chat-history-icon-button"
+					title="Resume chat"
+					aria-label="Resume chat"
+					onClick={() => onResume(entry)}
+				/>
 			</div>
 		</div>
 	);
