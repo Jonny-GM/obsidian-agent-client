@@ -83,6 +83,14 @@ export interface AgentClientPluginSettings {
 	sendMessageShortcut: SendMessageShortcut;
 }
 
+type UpdateCheckResult = {
+	available: boolean;
+	version?: string;
+	source?: "stable" | "prerelease" | "ci";
+	ciRunUrl?: string;
+	ciArtifactUrl?: string;
+};
+
 const DEFAULT_SETTINGS: AgentClientPluginSettings = {
 	claude: {
 		id: "claude-code-acp",
@@ -937,8 +945,9 @@ export default class AgentClientPlugin extends Plugin {
 	 * Fetch the latest stable release version from GitHub.
 	 */
 	private async fetchLatestStable(): Promise<string | null> {
+		const { owner, repo } = this.getUpdateRepo();
 		const response = await requestUrl({
-			url: "https://api.github.com/repos/RAIT-09/obsidian-agent-client/releases/latest",
+			url: `https://api.github.com/repos/${owner}/${repo}/releases/latest`,
 		});
 		const data = response.json as { tag_name?: string };
 		return data.tag_name ? semver.clean(data.tag_name) : null;
@@ -948,8 +957,9 @@ export default class AgentClientPlugin extends Plugin {
 	 * Fetch the latest prerelease version from GitHub.
 	 */
 	private async fetchLatestPrerelease(): Promise<string | null> {
+		const { owner, repo } = this.getUpdateRepo();
 		const response = await requestUrl({
-			url: "https://api.github.com/repos/RAIT-09/obsidian-agent-client/releases",
+			url: `https://api.github.com/repos/${owner}/${repo}/releases`,
 		});
 		const releases = response.json as Array<{
 			tag_name: string;
@@ -963,12 +973,131 @@ export default class AgentClientPlugin extends Plugin {
 			: null;
 	}
 
+	private async fetchLatestCiBuild(): Promise<{
+		version: string;
+		runUrl: string;
+		artifactUrl: string;
+	} | null> {
+		const { owner, repo } = this.getUpdateRepo();
+		const branches = await this.fetchUpdateBranches(owner, repo);
+		const workflowResponse = await requestUrl({
+			url: `https://api.github.com/repos/${owner}/${repo}/actions/workflows/push-release.yaml/runs?per_page=20&status=success`,
+		});
+		const workflowData = workflowResponse.json as {
+			workflow_runs?: Array<{
+				id: number;
+				head_sha: string;
+				head_branch: string;
+				html_url: string;
+				created_at: string;
+			}>;
+		};
+
+		const candidateRuns = (workflowData.workflow_runs ?? [])
+			.filter((run) => branches.includes(run.head_branch))
+			.sort(
+				(a, b) =>
+					new Date(b.created_at).getTime() -
+					new Date(a.created_at).getTime(),
+			);
+		const latestRun = candidateRuns[0];
+		if (!latestRun?.head_sha || !latestRun.id) {
+			return null;
+		}
+
+		const artifactUrl = await this.fetchLatestArtifactUrl(
+			owner,
+			repo,
+			latestRun.id,
+		);
+		if (!artifactUrl) {
+			return null;
+		}
+
+		const manifestResponse = await requestUrl({
+			url: `https://raw.githubusercontent.com/${owner}/${repo}/${latestRun.head_sha}/manifest.json`,
+		});
+		const manifestData = manifestResponse.json as { version?: string };
+		const version = manifestData.version
+			? semver.clean(manifestData.version)
+			: null;
+		if (!version) {
+			return null;
+		}
+
+		return {
+			version,
+			runUrl: latestRun.html_url,
+			artifactUrl,
+		};
+	}
+
+	private async fetchUpdateBranches(
+		owner: string,
+		repo: string,
+	): Promise<string[]> {
+		const response = await requestUrl({
+			url: `https://api.github.com/repos/${owner}/${repo}`,
+		});
+		const data = response.json as { default_branch?: string };
+		const branches = new Set<string>();
+		if (data.default_branch) {
+			branches.add(data.default_branch);
+		}
+		branches.add("dev");
+		return Array.from(branches);
+	}
+
+	private async fetchLatestArtifactUrl(
+		owner: string,
+		repo: string,
+		runId: number,
+	): Promise<string | null> {
+		const response = await requestUrl({
+			url: `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/artifacts`,
+		});
+		const data = response.json as {
+			artifacts?: Array<{
+				name: string;
+				archive_download_url: string;
+			}>;
+		};
+		const artifact = data.artifacts?.find(
+			(item) => item.name === "obsidian-agent-client",
+		);
+		return artifact?.archive_download_url ?? null;
+	}
+
+	private getUpdateRepo(): { owner: string; repo: string } {
+		const fallbackOwner = "RAIT-09";
+		const fallbackRepo = "obsidian-agent-client";
+		const authorUrl = this.manifest.authorUrl;
+		if (!authorUrl) {
+			return { owner: fallbackOwner, repo: fallbackRepo };
+		}
+
+		try {
+			const url = new URL(authorUrl);
+			const owner = url.pathname.replace(/^\/+/, "").split("/")[0];
+			if (owner) {
+				return { owner, repo: fallbackRepo };
+			}
+		} catch (error) {
+			this.logger?.error(
+				"[Agent Client] Failed to parse authorUrl for update repo:",
+				error,
+			);
+		}
+
+		return { owner: fallbackOwner, repo: fallbackRepo };
+	}
+
 	/**
 	 * Check for plugin updates.
 	 * - Stable version users: compare with latest stable release
 	 * - Prerelease users: compare with both latest stable and latest prerelease
 	 */
-	async checkForUpdates(): Promise<boolean> {
+	async checkForUpdates(): Promise<UpdateCheckResult> {
 		const currentVersion =
 			semver.clean(this.manifest.version) || this.manifest.version;
 		const isCurrentPrerelease = semver.prerelease(currentVersion) !== null;
@@ -993,18 +1122,60 @@ export default class AgentClientPlugin extends Plugin {
 				new Notice(
 					`[Agent Client] Update available: v${newestVersion}`,
 				);
-				return true;
+				return {
+					available: true,
+					version: newestVersion ?? undefined,
+					source: hasNewerStable ? "stable" : "prerelease",
+				};
+			}
+
+			const latestCiBuild = await this.fetchLatestCiBuild();
+			if (
+				latestCiBuild &&
+				semver.gt(latestCiBuild.version, currentVersion)
+			) {
+				new Notice(
+					`[Agent Client] CI build available: v${latestCiBuild.version} (Artifacts: ${latestCiBuild.artifactUrl})`,
+				);
+				return {
+					available: true,
+					version: latestCiBuild.version,
+					source: "ci",
+					ciRunUrl: latestCiBuild.runUrl,
+					ciArtifactUrl: latestCiBuild.artifactUrl,
+				};
 			}
 		} else {
 			// Stable version user: check stable only
 			const latestStable = await this.fetchLatestStable();
 			if (latestStable && semver.gt(latestStable, currentVersion)) {
 				new Notice(`[Agent Client] Update available: v${latestStable}`);
-				return true;
+				return {
+					available: true,
+					version: latestStable,
+					source: "stable",
+				};
+			}
+
+			const latestCiBuild = await this.fetchLatestCiBuild();
+			if (
+				latestCiBuild &&
+				semver.gt(latestCiBuild.version, currentVersion)
+			) {
+				new Notice(
+					`[Agent Client] CI build available: v${latestCiBuild.version} (Artifacts: ${latestCiBuild.artifactUrl})`,
+				);
+				return {
+					available: true,
+					version: latestCiBuild.version,
+					source: "ci",
+					ciRunUrl: latestCiBuild.runUrl,
+					ciArtifactUrl: latestCiBuild.artifactUrl,
+				};
 			}
 		}
 
-		return false;
+		return { available: false };
 	}
 
 	ensureActiveAgentId(): void {

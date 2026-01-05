@@ -668,7 +668,9 @@ function ChatComponent({
 	useEffect(() => {
 		plugin
 			.checkForUpdates()
-			.then(setIsUpdateAvailable)
+			.then((result) => {
+				setIsUpdateAvailable(result.available);
+			})
 			.catch((error) => {
 				console.error("Failed to check for updates:", error);
 				logger.error(
