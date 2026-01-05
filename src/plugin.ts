@@ -87,10 +87,22 @@ type UpdateCheckResult = {
 	available: boolean;
 	version?: string;
 	source?: "stable" | "prerelease" | "ci";
+	releaseUrl?: string;
+	releaseAssets?: ReleaseAsset[];
 	ciRunUrl?: string;
 	ciArtifactUrl?: string;
 };
 
+type ReleaseAsset = {
+	name: string;
+	downloadUrl: string;
+};
+
+type ReleaseInfo = {
+	version: string;
+	htmlUrl: string;
+	assets: ReleaseAsset[];
+};
 const DEFAULT_SETTINGS: AgentClientPluginSettings = {
 	claude: {
 		id: "claude-code-acp",
@@ -942,21 +954,40 @@ export default class AgentClientPlugin extends Plugin {
 	}
 
 	/**
-	 * Fetch the latest stable release version from GitHub.
+	 * Fetch the latest stable release from GitHub.
 	 */
-	private async fetchLatestStable(): Promise<string | null> {
+	private async fetchLatestStableRelease(): Promise<ReleaseInfo | null> {
 		const { owner, repo } = this.getUpdateRepo();
 		const response = await requestUrl({
 			url: `https://api.github.com/repos/${owner}/${repo}/releases/latest`,
 		});
-		const data = response.json as { tag_name?: string };
-		return data.tag_name ? semver.clean(data.tag_name) : null;
+		const data = response.json as {
+			tag_name?: string;
+			html_url?: string;
+			assets?: Array<{
+				name: string;
+				browser_download_url: string;
+			}>;
+		};
+		if (!data.tag_name || !data.html_url) {
+			return null;
+		}
+		const version = semver.clean(data.tag_name) ?? data.tag_name;
+		return {
+			version,
+			htmlUrl: data.html_url,
+			assets:
+				data.assets?.map((asset) => ({
+					name: asset.name,
+					downloadUrl: asset.browser_download_url,
+				})) ?? [],
+		};
 	}
 
 	/**
-	 * Fetch the latest prerelease version from GitHub.
+	 * Fetch the latest prerelease from GitHub.
 	 */
-	private async fetchLatestPrerelease(): Promise<string | null> {
+	private async fetchLatestPrereleaseRelease(): Promise<ReleaseInfo | null> {
 		const { owner, repo } = this.getUpdateRepo();
 		const response = await requestUrl({
 			url: `https://api.github.com/repos/${owner}/${repo}/releases`,
@@ -964,13 +995,32 @@ export default class AgentClientPlugin extends Plugin {
 		const releases = response.json as Array<{
 			tag_name: string;
 			prerelease: boolean;
+			html_url?: string;
+			assets?: Array<{
+				name: string;
+				browser_download_url: string;
+			}>;
 		}>;
 
 		// Find the first prerelease (releases are sorted by date descending)
-		const latestPrerelease = releases.find((r) => r.prerelease);
-		return latestPrerelease
-			? semver.clean(latestPrerelease.tag_name)
-			: null;
+		const latestPrerelease = releases.find(
+			(release) => release.prerelease,
+		);
+		if (!latestPrerelease?.html_url) {
+			return null;
+		}
+		const version =
+			semver.clean(latestPrerelease.tag_name) ??
+			latestPrerelease.tag_name;
+		return {
+			version,
+			htmlUrl: latestPrerelease.html_url,
+			assets:
+				latestPrerelease.assets?.map((asset) => ({
+					name: asset.name,
+					downloadUrl: asset.browser_download_url,
+				})) ?? [],
+		};
 	}
 
 	private async fetchLatestCiBuild(): Promise<{
@@ -1030,6 +1080,72 @@ export default class AgentClientPlugin extends Plugin {
 			runUrl: latestRun.html_url,
 			artifactUrl,
 		};
+	}
+
+	private getReleaseAsset(
+		assets: ReleaseAsset[],
+		name: string,
+	): ReleaseAsset | null {
+		return assets.find((asset) => asset.name === name) ?? null;
+	}
+
+	private async downloadAssetBuffer(url: string): Promise<ArrayBuffer> {
+		const response = await requestUrl({ url });
+		if (!response.arrayBuffer) {
+			throw new Error(`Failed to download asset: ${url}`);
+		}
+		return response.arrayBuffer;
+	}
+
+	private async downloadAssetText(url: string): Promise<string> {
+		const response = await requestUrl({ url });
+		if (!response.text) {
+			throw new Error(`Failed to download asset: ${url}`);
+		}
+		return response.text;
+	}
+
+	private getPluginFolderPath(): string {
+		const vaultConfigDir = this.app.vault.configDir ?? ".obsidian";
+		return `${vaultConfigDir}/plugins/${this.manifest.id}`;
+	}
+
+	private async installReleaseAssets(
+		assets: ReleaseAsset[],
+	): Promise<void> {
+		const mainAsset = this.getReleaseAsset(assets, "main.js");
+		const manifestAsset = this.getReleaseAsset(assets, "manifest.json");
+		const stylesAsset = this.getReleaseAsset(assets, "styles.css");
+
+		if (!mainAsset || !manifestAsset || !stylesAsset) {
+			throw new Error(
+				"Release assets are missing required plugin files.",
+			);
+		}
+
+		const [mainBuffer, manifestText, stylesBuffer] = await Promise.all([
+			this.downloadAssetBuffer(mainAsset.downloadUrl),
+			this.downloadAssetText(manifestAsset.downloadUrl),
+			this.downloadAssetBuffer(stylesAsset.downloadUrl),
+		]);
+
+		const adapter = this.app.vault.adapter;
+		const pluginFolder = this.getPluginFolderPath();
+		if (!(await adapter.exists(pluginFolder))) {
+			await adapter.mkdir(pluginFolder);
+		}
+
+		await Promise.all([
+			adapter.writeBinary(
+				`${pluginFolder}/main.js`,
+				mainBuffer,
+			),
+			adapter.write(`${pluginFolder}/manifest.json`, manifestText),
+			adapter.writeBinary(
+				`${pluginFolder}/styles.css`,
+				stylesBuffer,
+			),
+		]);
 	}
 
 	private async fetchUpdateBranches(
@@ -1105,27 +1221,31 @@ export default class AgentClientPlugin extends Plugin {
 		if (isCurrentPrerelease) {
 			// Prerelease user: check both stable and prerelease
 			const [latestStable, latestPrerelease] = await Promise.all([
-				this.fetchLatestStable(),
-				this.fetchLatestPrerelease(),
+				this.fetchLatestStableRelease(),
+				this.fetchLatestPrereleaseRelease(),
 			]);
 
 			const hasNewerStable =
-				latestStable && semver.gt(latestStable, currentVersion);
+				latestStable &&
+				semver.gt(latestStable.version, currentVersion);
 			const hasNewerPrerelease =
-				latestPrerelease && semver.gt(latestPrerelease, currentVersion);
+				latestPrerelease &&
+				semver.gt(latestPrerelease.version, currentVersion);
 
 			if (hasNewerStable || hasNewerPrerelease) {
 				// Prefer stable version notification if available
-				const newestVersion = hasNewerStable
+				const newestRelease = hasNewerStable
 					? latestStable
 					: latestPrerelease;
 				new Notice(
-					`[Agent Client] Update available: v${newestVersion}`,
+					`[Agent Client] Update available: v${newestRelease?.version}`,
 				);
 				return {
 					available: true,
-					version: newestVersion ?? undefined,
+					version: newestRelease?.version ?? undefined,
 					source: hasNewerStable ? "stable" : "prerelease",
+					releaseUrl: newestRelease?.htmlUrl,
+					releaseAssets: newestRelease?.assets ?? [],
 				};
 			}
 
@@ -1147,13 +1267,20 @@ export default class AgentClientPlugin extends Plugin {
 			}
 		} else {
 			// Stable version user: check stable only
-			const latestStable = await this.fetchLatestStable();
-			if (latestStable && semver.gt(latestStable, currentVersion)) {
-				new Notice(`[Agent Client] Update available: v${latestStable}`);
+			const latestStable = await this.fetchLatestStableRelease();
+			if (
+				latestStable &&
+				semver.gt(latestStable.version, currentVersion)
+			) {
+				new Notice(
+					`[Agent Client] Update available: v${latestStable.version}`,
+				);
 				return {
 					available: true,
-					version: latestStable,
+					version: latestStable.version,
 					source: "stable",
+					releaseUrl: latestStable.htmlUrl,
+					releaseAssets: latestStable.assets,
 				};
 			}
 
@@ -1176,6 +1303,36 @@ export default class AgentClientPlugin extends Plugin {
 		}
 
 		return { available: false };
+	}
+
+	async applyUpdate(update: UpdateCheckResult): Promise<"installed" | "opened"> {
+		if (!update.available) {
+			throw new Error("No update available.");
+		}
+
+		if (Platform.isMobileApp) {
+			if (update.releaseUrl) {
+				window.open(update.releaseUrl);
+				return "opened";
+			}
+			throw new Error("Updates must be installed manually on mobile.");
+		}
+
+		if (update.source === "ci") {
+			const url = update.ciRunUrl || update.ciArtifactUrl;
+			if (url) {
+				window.open(url);
+				return "opened";
+			}
+			throw new Error("CI update is missing a download URL.");
+		}
+
+		if (!update.releaseAssets) {
+			throw new Error("Release assets are missing.");
+		}
+
+		await this.installReleaseAssets(update.releaseAssets);
+		return "installed";
 	}
 
 	ensureActiveAgentId(): void {

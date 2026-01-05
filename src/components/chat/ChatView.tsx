@@ -191,6 +191,10 @@ function ChatComponent({
 	// Local State
 	// ============================================================
 	const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
+	const [updateInfo, setUpdateInfo] = useState<
+		Awaited<ReturnType<AgentClientPlugin["checkForUpdates"]>> | null
+	>(null);
+	const [isUpdating, setIsUpdating] = useState(false);
 	const [restoredMessage, setRestoredMessage] = useState<string | null>(null);
 	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 	const [historyEntries, setHistoryEntries] = useState<ChatHistoryEntry[]>(
@@ -328,6 +332,29 @@ function ChatComponent({
 		appWithSettings.setting.open();
 		appWithSettings.setting.openTabById(plugin.manifest.id);
 	}, [plugin]);
+
+	const handleUpdatePlugin = useCallback(async () => {
+		if (!updateInfo || !updateInfo.available) {
+			new Notice("[Agent Client] No update available");
+			return;
+		}
+		setIsUpdating(true);
+		try {
+			const result = await plugin.applyUpdate(updateInfo);
+			if (result === "installed") {
+				new Notice(
+					"[Agent Client] Update installed. Restart Obsidian to apply changes.",
+				);
+			} else {
+				new Notice("[Agent Client] Opened update download.");
+			}
+		} catch (error) {
+			logger.error("[ChatView] Update failed:", error);
+			new Notice("[Agent Client] Failed to update plugin");
+		} finally {
+			setIsUpdating(false);
+		}
+	}, [logger, plugin, updateInfo]);
 
 	const refreshHistory = useCallback(async () => {
 		const entries = await chatHistoryStore.listChats();
@@ -654,6 +681,7 @@ function ChatComponent({
 		plugin
 			.checkForUpdates()
 			.then((result) => {
+				setUpdateInfo(result);
 				setIsUpdateAvailable(result.available);
 			})
 			.catch((error) => {
@@ -796,6 +824,7 @@ function ChatComponent({
 			<ChatHeader
 				agentLabel={activeAgentLabel}
 				isUpdateAvailable={isUpdateAvailable}
+				isUpdating={isUpdating}
 				sessionState={session.state}
 				reconnectStatus={reconnectStatus}
 				isBridgeEnabled={isBridgeEnabled}
@@ -806,6 +835,7 @@ function ChatComponent({
 				onOpenSettings={handleOpenSettings}
 				onReconnectNow={() => void agentSession.reconnectNow()}
 				onCancelReconnect={agentSession.cancelReconnect}
+				onUpdatePlugin={handleUpdatePlugin}
 			/>
 
 			<ChatHistoryPanel
