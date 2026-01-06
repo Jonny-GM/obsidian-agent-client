@@ -5,6 +5,11 @@ Obsidian plugin for AI agent interaction (Claude Code, Gemini CLI, custom agents
 
 **Tech**: React 19, TypeScript, Obsidian API, Agent Client Protocol (ACP)
 
+## Git Remotes
+Expected repository remotes:
+- `origin`: `https://github.com/Jonny-GM/obsidian-agent-client.git`
+- `upstream`: `https://github.com/RAIT-09/obsidian-agent-client.git`
+
 ## Architecture
 
 ```
