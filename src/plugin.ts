@@ -7,7 +7,7 @@ import {
 	WorkspaceLeaf,
 	requestUrl,
 } from "obsidian";
-import AdmZip from "adm-zip";
+import { strFromU8, unzipSync } from "fflate";
 import * as semver from "semver";
 import { ChatView, VIEW_TYPE_CHAT } from "./components/chat/ChatView";
 import {
@@ -1106,8 +1106,8 @@ export default class AgentClientPlugin extends Plugin {
 		return response.text;
 	}
 
-	private bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
-		return Uint8Array.from(buffer).buffer;
+	private bufferToArrayBuffer(data: Uint8Array): ArrayBuffer {
+		return Uint8Array.from(data).buffer;
 	}
 
 	private getPluginFolderPath(): string {
@@ -1196,18 +1196,13 @@ export default class AgentClientPlugin extends Plugin {
 	}
 
 	private getArtifactEntry(
-		zip: AdmZip,
+		entries: Record<string, Uint8Array>,
 		filename: string,
-	): AdmZip.IZipEntry | null {
-		return (
-			zip
-				.getEntries()
-				.find(
-					(entry: AdmZip.IZipEntry) =>
-						!entry.isDirectory &&
-						entry.entryName.split("/").pop() === filename,
-				) ?? null
+	): Uint8Array | null {
+		const entryName = Object.keys(entries).find(
+			(name) => name.split("/").pop() === filename,
 		);
+		return entryName ? entries[entryName] ?? null : null;
 	}
 
 	private async installCiArtifact(artifactUrl: string): Promise<void> {
@@ -1223,10 +1218,10 @@ export default class AgentClientPlugin extends Plugin {
 			);
 		}
 
-		const zip = new AdmZip(Buffer.from(response.arrayBuffer));
-		const mainEntry = this.getArtifactEntry(zip, "main.js");
-		const manifestEntry = this.getArtifactEntry(zip, "manifest.json");
-		const stylesEntry = this.getArtifactEntry(zip, "styles.css");
+		const entries = unzipSync(new Uint8Array(response.arrayBuffer));
+		const mainEntry = this.getArtifactEntry(entries, "main.js");
+		const manifestEntry = this.getArtifactEntry(entries, "manifest.json");
+		const stylesEntry = this.getArtifactEntry(entries, "styles.css");
 
 		if (!mainEntry || !manifestEntry || !stylesEntry) {
 			throw new Error(
@@ -1234,13 +1229,9 @@ export default class AgentClientPlugin extends Plugin {
 			);
 		}
 
-		const mainBuffer = this.bufferToArrayBuffer(
-			mainEntry.getData(),
-		);
-		const manifestText = manifestEntry.getData().toString("utf8");
-		const stylesBuffer = this.bufferToArrayBuffer(
-			stylesEntry.getData(),
-		);
+		const mainBuffer = this.bufferToArrayBuffer(mainEntry);
+		const manifestText = strFromU8(manifestEntry);
+		const stylesBuffer = this.bufferToArrayBuffer(stylesEntry);
 
 		const adapter = this.app.vault.adapter;
 		const pluginFolder = this.getPluginFolderPath();
@@ -1389,27 +1380,13 @@ export default class AgentClientPlugin extends Plugin {
 			throw new Error("No update available.");
 		}
 
-		if (Platform.isMobileApp) {
-			if (update.releaseUrl) {
-				window.open(update.releaseUrl);
-				return "opened";
-			}
-			throw new Error("Updates must be installed manually on mobile.");
+		const latestCiBuild = await this.fetchLatestCiBuild();
+		const ciArtifactUrl = latestCiBuild?.artifactUrl ?? update.ciArtifactUrl;
+		if (!ciArtifactUrl) {
+			throw new Error("Latest CI artifact is unavailable.");
 		}
 
-		if (update.source === "ci") {
-			if (update.ciArtifactUrl) {
-				await this.installCiArtifact(update.ciArtifactUrl);
-				return "installed";
-			}
-			throw new Error("CI update is missing a download URL.");
-		}
-
-		if (!update.releaseAssets) {
-			throw new Error("Release assets are missing.");
-		}
-
-		await this.installReleaseAssets(update.releaseAssets);
+		await this.installCiArtifact(ciArtifactUrl);
 		return "installed";
 	}
 
