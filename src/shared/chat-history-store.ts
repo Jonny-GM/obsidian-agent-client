@@ -11,6 +11,7 @@ import { TFile, TFolder } from "obsidian";
 
 const SCHEMA_VERSION = 1;
 const CONFLICT_MARKER = "(conflict";
+const HISTORY_TAGS = ["agent-client"];
 
 export class ChatHistoryStore {
 	private logger: Logger;
@@ -103,6 +104,7 @@ export class ChatHistoryStore {
 			createdAt: startedAt.toISOString(),
 			updatedAt: new Date().toISOString(),
 			messageCount: messages.length,
+			tags: HISTORY_TAGS,
 			title: deriveChatTitle(messages),
 			messages: serializeMessages(messages),
 		};

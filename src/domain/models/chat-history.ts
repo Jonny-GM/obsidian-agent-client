@@ -14,6 +14,7 @@ export interface ChatHistoryRecord {
 	createdAt: string;
 	updatedAt: string;
 	messageCount: number;
+	tags?: string[];
 	title?: string;
 	messages: SerializedChatMessage[];
 }
