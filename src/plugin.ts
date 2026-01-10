@@ -77,6 +77,7 @@ export interface AgentClientPluginSettings {
 		autoSave: boolean;
 		autoSaveDebounceMs: number;
 	};
+	lastCiRunId: number | null;
 	// WSL settings (Windows only)
 	windowsWslMode: boolean;
 	windowsWslDistribution?: string;
@@ -91,6 +92,7 @@ type UpdateCheckResult = {
 	releaseUrl?: string;
 	releaseAssets?: ReleaseAsset[];
 	ciRunUrl?: string;
+	ciRunId?: number;
 	ciArtifactUrl?: string;
 };
 
@@ -165,6 +167,7 @@ const DEFAULT_SETTINGS: AgentClientPluginSettings = {
 		autoSave: true,
 		autoSaveDebounceMs: 800,
 	},
+	lastCiRunId: null,
 	windowsWslMode: false,
 	windowsWslDistribution: undefined,
 	sendMessageShortcut: "enter",
@@ -737,6 +740,12 @@ export default class AgentClientPlugin extends Plugin {
 			typeof rawSettings.acpBridge === "object"
 				? (rawSettings.acpBridge as Record<string, unknown>)
 				: {};
+		const parsedLastCiRunId =
+			typeof rawSettings.lastCiRunId === "number"
+				? rawSettings.lastCiRunId
+				: typeof rawSettings.lastCiRunId === "string"
+					? Number.parseInt(rawSettings.lastCiRunId, 10)
+					: NaN;
 
 		this.settings = {
 			claude: {
@@ -913,6 +922,9 @@ export default class AgentClientPlugin extends Plugin {
 				}
 				return DEFAULT_SETTINGS.historySettings;
 			})(),
+			lastCiRunId: Number.isFinite(parsedLastCiRunId)
+				? parsedLastCiRunId
+				: DEFAULT_SETTINGS.lastCiRunId,
 			windowsWslMode:
 				typeof rawSettings.windowsWslMode === "boolean"
 					? rawSettings.windowsWslMode
@@ -1026,6 +1038,7 @@ export default class AgentClientPlugin extends Plugin {
 
 	private async fetchLatestCiBuild(): Promise<{
 		version: string;
+		runId: number;
 		runUrl: string;
 		artifactUrl: string;
 	} | null> {
@@ -1078,6 +1091,7 @@ export default class AgentClientPlugin extends Plugin {
 
 		return {
 			version,
+			runId: latestRun.id,
 			runUrl: latestRun.html_url,
 			artifactUrl,
 		};
@@ -1287,6 +1301,20 @@ export default class AgentClientPlugin extends Plugin {
 		const currentVersion =
 			semver.clean(this.manifest.version) || this.manifest.version;
 		const isCurrentPrerelease = semver.prerelease(currentVersion) !== null;
+		const hasNewerCiBuild = (
+			latestCiBuild: Awaited<ReturnType<typeof this.fetchLatestCiBuild>>,
+		): boolean => {
+			if (!latestCiBuild) {
+				return false;
+			}
+			if (semver.gt(latestCiBuild.version, currentVersion)) {
+				return true;
+			}
+			return (
+				semver.eq(latestCiBuild.version, currentVersion) &&
+				latestCiBuild.runId !== this.settings.lastCiRunId
+			);
+		};
 
 		if (isCurrentPrerelease) {
 			// Prerelease user: check both stable and prerelease
@@ -1320,19 +1348,20 @@ export default class AgentClientPlugin extends Plugin {
 			}
 
 			const latestCiBuild = await this.fetchLatestCiBuild();
-			if (
-				latestCiBuild &&
-				semver.gt(latestCiBuild.version, currentVersion)
-			) {
+			if (hasNewerCiBuild(latestCiBuild)) {
+				const ciBuild = latestCiBuild as NonNullable<
+					Awaited<ReturnType<typeof this.fetchLatestCiBuild>>
+				>;
 				new Notice(
-					`[Agent Client] CI build available: v${latestCiBuild.version} (Artifacts: ${latestCiBuild.artifactUrl})`,
+					`[Agent Client] CI build available: v${ciBuild.version} (Artifacts: ${ciBuild.artifactUrl})`,
 				);
 				return {
 					available: true,
-					version: latestCiBuild.version,
+					version: ciBuild.version,
 					source: "ci",
-					ciRunUrl: latestCiBuild.runUrl,
-					ciArtifactUrl: latestCiBuild.artifactUrl,
+					ciRunId: ciBuild.runId,
+					ciRunUrl: ciBuild.runUrl,
+					ciArtifactUrl: ciBuild.artifactUrl,
 				};
 			}
 		} else {
@@ -1355,19 +1384,20 @@ export default class AgentClientPlugin extends Plugin {
 			}
 
 			const latestCiBuild = await this.fetchLatestCiBuild();
-			if (
-				latestCiBuild &&
-				semver.gt(latestCiBuild.version, currentVersion)
-			) {
+			if (hasNewerCiBuild(latestCiBuild)) {
+				const ciBuild = latestCiBuild as NonNullable<
+					Awaited<ReturnType<typeof this.fetchLatestCiBuild>>
+				>;
 				new Notice(
-					`[Agent Client] CI build available: v${latestCiBuild.version} (Artifacts: ${latestCiBuild.artifactUrl})`,
+					`[Agent Client] CI build available: v${ciBuild.version} (Artifacts: ${ciBuild.artifactUrl})`,
 				);
 				return {
 					available: true,
-					version: latestCiBuild.version,
+					version: ciBuild.version,
 					source: "ci",
-					ciRunUrl: latestCiBuild.runUrl,
-					ciArtifactUrl: latestCiBuild.artifactUrl,
+					ciRunId: ciBuild.runId,
+					ciRunUrl: ciBuild.runUrl,
+					ciArtifactUrl: ciBuild.artifactUrl,
 				};
 			}
 		}
@@ -1387,6 +1417,12 @@ export default class AgentClientPlugin extends Plugin {
 		}
 
 		await this.installCiArtifact(ciArtifactUrl);
+		const ciRunId = latestCiBuild?.runId ?? update.ciRunId ?? null;
+		if (ciRunId) {
+			await this.settingsStore.updateSettings({
+				lastCiRunId: ciRunId,
+			});
+		}
 		return "installed";
 	}
 
