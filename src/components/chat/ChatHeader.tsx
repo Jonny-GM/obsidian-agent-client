@@ -198,7 +198,7 @@ export function ChatHeader({
 					onClick={onOpenHistory}
 				/>
 				<HeaderButton
-					iconName="export"
+					iconName="download"
 					tooltip="Export chat to Markdown"
 					onClick={onExportChat}
 				/>
