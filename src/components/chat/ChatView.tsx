@@ -540,6 +540,25 @@ function ChatComponent({
 	]);
 
 	useEffect(() => {
+		if (!isSending) {
+			return;
+		}
+		if (session.state === "ready") {
+			return;
+		}
+		chat.resetSendingState();
+		if (chat.lastUserMessage && !restoredMessage) {
+			setRestoredMessage(chat.lastUserMessage);
+		}
+	}, [
+		chat,
+		isSending,
+		restoredMessage,
+		session.state,
+		chat.lastUserMessage,
+	]);
+
+	useEffect(() => {
 		if (!settings.historySettings.autoSave) {
 			return;
 		}
