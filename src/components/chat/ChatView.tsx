@@ -382,6 +382,12 @@ function ChatComponent({
 			setChatId(record.chatId);
 			setChatStartedAt(new Date(record.createdAt));
 			setChatHistoryPath(entry.path);
+			const historyPath = vaultPath
+				? `${vaultPath}/${entry.path}`
+				: entry.path;
+			setRestoredMessage(
+				`Chat history was loaded from ${historyPath}. If you need more context, review that file.`,
+			);
 
 			if (entry.agentId !== session.agentId) {
 				await agentSession.switchAgent(entry.agentId);
@@ -389,7 +395,7 @@ function ChatComponent({
 			await agentSession.restartSession();
 			setIsHistoryOpen(false);
 		},
-		[agentSession, chat, chatHistoryStore, session.agentId],
+		[agentSession, chat, chatHistoryStore, session.agentId, vaultPath],
 	);
 
 	const handleSendMessage = useCallback(
