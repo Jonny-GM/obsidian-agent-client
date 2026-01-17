@@ -488,6 +488,20 @@ export class AgentClientSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}),
 			);
+
+		new Setting(containerEl)
+			.setName("Write debug logs to vault")
+			.setDesc(
+				"Write debug logs to the vault log file. Disable to avoid file writes.",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.debugWriteToVaultLog)
+					.onChange(async (value) => {
+						this.plugin.settings.debugWriteToVaultLog = value;
+						await this.plugin.saveSettings();
+					}),
+			);
 	}
 
 	/**

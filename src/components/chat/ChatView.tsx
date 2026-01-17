@@ -55,6 +55,47 @@ interface AppWithSettings {
 
 export const VIEW_TYPE_CHAT = "agent-client-chat-view";
 
+class ChatErrorBoundary extends React.Component<
+	{ plugin: AgentClientPlugin; children: React.ReactNode },
+	{ hasError: boolean; message: string }
+> {
+	private logger: Logger;
+
+	constructor(props: { plugin: AgentClientPlugin; children: React.ReactNode }) {
+		super(props);
+		this.state = { hasError: false, message: "" };
+		this.logger = new Logger(props.plugin);
+	}
+
+	static getDerivedStateFromError(error: Error) {
+		return { hasError: true, message: error.message };
+	}
+
+	componentDidCatch(error: Error, info: React.ErrorInfo) {
+		this.logger.error("[ChatView] Render error:", error, info);
+		new Notice(
+			"[Agent Client] Chat view failed to render. Please reopen the view.",
+		);
+	}
+
+	render() {
+		if (this.state.hasError) {
+			return (
+				<div className="agent-client-chat-view-container">
+					<p>
+						Agent Client encountered an error rendering this view.
+					</p>
+					{this.state.message ? (
+						<p>Details: {this.state.message}</p>
+					) : null}
+				</div>
+			);
+		}
+
+		return this.props.children;
+	}
+}
+
 function ChatComponent({
 	plugin,
 	view,
@@ -72,7 +113,7 @@ function ChatComponent({
 			(plugin.app.vault.adapter as VaultAdapterWithBasePath).basePath ||
 			(Platform.isDesktopApp ? process.cwd() : "")
 		);
-	}, [plugin]);
+	}, [logger, plugin]);
 
 	const noteMentionService = useMemo(
 		() => new NoteMentionService(plugin),
@@ -254,6 +295,18 @@ function ChatComponent({
 
 	const canStartSessionOnMobile =
 		Platform.isMobileApp && !requiresBridgeOnMobile;
+
+	useEffect(() => {
+		logger.log("[ChatView] Mounted", {
+			isMobile: Platform.isMobileApp,
+			isBridgeEnabled,
+			requiresBridgeOnMobile,
+			vaultPath,
+		});
+		return () => {
+			logger.log("[ChatView] Unmounted");
+		};
+	}, [isBridgeEnabled, logger, requiresBridgeOnMobile, vaultPath]);
 
 	// ============================================================
 	// Callbacks
@@ -626,9 +679,45 @@ function ChatComponent({
 			new Notice(
 				"[Agent Client] ACP bridge is required on mobile. Enable it in settings.",
 			);
+			logger.log(
+				"[ChatView] ACP bridge required on mobile. Skipping session creation.",
+			);
 		}
-	}, [requiresBridgeOnMobile]);
+	}, [logger, requiresBridgeOnMobile]);
 
+	useEffect(() => {
+		logger.log("[ChatView] Session state changed", {
+			state: session.state,
+			sessionId: session.sessionId,
+			agentId: session.agentId,
+			isBridgeEnabled,
+		});
+	}, [
+		isBridgeEnabled,
+		logger,
+		session.agentId,
+		session.sessionId,
+		session.state,
+	]);
+
+	useEffect(() => {
+		if (!isSending) {
+			return;
+		}
+		if (session.state === "ready") {
+			return;
+		}
+		chat.resetSendingState();
+		if (chat.lastUserMessage && !restoredMessage) {
+			setRestoredMessage(chat.lastUserMessage);
+		}
+	}, [
+		chat,
+		isSending,
+		restoredMessage,
+		session.state,
+		chat.lastUserMessage,
+	]);
 	// Refs for cleanup (to access latest values in cleanup function)
 	const messagesRef = useRef(messages);
 	const sessionRef = useRef(session);
@@ -645,12 +734,21 @@ function ChatComponent({
 			logger.log("[ChatView] Cleanup: auto-export and close session");
 			// Use refs to get latest values (avoid stale closures)
 			void (async () => {
-				await autoExportRef.current.autoExportIfEnabled(
-					"closeChat",
-					messagesRef.current,
-					sessionRef.current,
-				);
-				await closeSessionRef.current();
+				try {
+					await autoExportRef.current.autoExportIfEnabled(
+						"closeChat",
+						messagesRef.current,
+						sessionRef.current,
+					);
+					await closeSessionRef.current();
+					logger.log("[ChatView] Cleanup complete", {
+						messageCount: messagesRef.current.length,
+						sessionId: sessionRef.current.sessionId,
+						state: sessionRef.current.state,
+					});
+				} catch (error) {
+					logger.error("[ChatView] Cleanup failed:", error);
+				}
 			})();
 		};
 		// Empty dependency array - only run on unmount
@@ -729,8 +827,23 @@ function ChatComponent({
 			.then(setIsUpdateAvailable)
 			.catch((error) => {
 				console.error("Failed to check for updates:", error);
+				logger.error(
+					"[ChatView] Failed to check for updates:",
+					error,
+				);
 			});
 	}, [plugin]);
+
+	useEffect(() => {
+		if (!settings.debugMode || !sessionErrorInfo) {
+			return;
+		}
+		logger.error(
+			"[Agent Client][Debug] Session error:",
+			sessionErrorInfo.title,
+			sessionErrorInfo.message,
+		);
+	}, [logger, sessionErrorInfo, settings.debugMode]);
 
 	// ============================================================
 	// Effects - Save Session Messages on Turn End
@@ -956,11 +1069,16 @@ export class ChatView extends ItemView {
 	}
 
 	onOpen() {
-		const container = this.containerEl.children[1];
+		this.logger.log("[ChatView] onOpen() called");
+		const container = this.contentEl ?? this.containerEl;
 		container.empty();
 
 		this.root = createRoot(container);
-		this.root.render(<ChatComponent plugin={this.plugin} view={this} />);
+		this.root.render(
+			<ChatErrorBoundary plugin={this.plugin}>
+				<ChatComponent plugin={this.plugin} view={this} />
+			</ChatErrorBoundary>,
+		);
 		return Promise.resolve();
 	}
 

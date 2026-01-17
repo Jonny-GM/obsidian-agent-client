@@ -152,6 +152,13 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		agentId?: string,
 	): void {
 		const shouldReport = this.usingBridge && this.isInitializedFlag;
+		this.logger.log("[AcpAdapter] Bridge disconnect detected:", {
+			title,
+			message,
+			agentId,
+			shouldReport,
+			readyState: this.bridgeSocket?.readyState,
+		});
 		if (this.bridgeSocket) {
 			this.bridgeSocket.close();
 			this.bridgeSocket = null;
@@ -216,7 +223,12 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		const agentLabel = `${config.displayName} (${config.id})`;
 
 		const openPromise = new Promise<void>((resolve, reject) => {
-			socket.addEventListener("open", () => resolve());
+			socket.addEventListener("open", () => {
+				this.logger.log(
+					`[AcpAdapter] ACP bridge socket opened for ${agentLabel}`,
+				);
+				resolve();
+			});
 			socket.addEventListener("error", () =>
 				reject(new Error("ACP bridge connection error")),
 			);
@@ -239,7 +251,11 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 						controller.enqueue(textEncoder.encode(event.data));
 					}
 				};
-				const handleClose = () => {
+				const handleClose = (event: CloseEvent) => {
+					this.logger.log(
+						`[AcpAdapter] ACP bridge socket closed for ${agentLabel}:`,
+						{ code: event.code, reason: event.reason },
+					);
 					this.handleBridgeDisconnect(
 						"ACP bridge connection closed",
 						`The ACP bridge connection closed for ${agentLabel}.`,
@@ -247,7 +263,11 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 					);
 					controller.close();
 				};
-				const handleError = () => {
+				const handleError = (event: Event) => {
+					this.logger.error(
+						`[AcpAdapter] ACP bridge socket error for ${agentLabel}:`,
+						event,
+					);
 					this.handleBridgeDisconnect(
 						"ACP bridge connection error",
 						`Failed to communicate with ACP bridge for ${agentLabel}.`,

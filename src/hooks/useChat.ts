@@ -47,6 +47,8 @@ export interface UseChatReturn {
 	lastUserMessage: string | null;
 	/** Error information from message operations */
 	errorInfo: ErrorInfo | null;
+	/** Reset the sending state (e.g., on disconnect) */
+	resetSendingState: () => void;
 
 	/**
 	 * Send a message to the agent.
@@ -548,9 +550,26 @@ export function useChat(
 		setErrorInfo(null);
 	}, []);
 
+/**
+ * Reset the sending state without clearing messages.
+ */
+const resetSendingState = useCallback((): void => {
+	setIsSending(false);
+	}, []);
+
 	/**
-	 * Check if paths should be converted to WSL format.
+	 * Replace the entire message list.
 	 */
+	const replaceMessages = useCallback((nextMessages: ChatMessage[]): void => {
+		setMessages(nextMessages);
+		setIsSending(false);
+	setLastUserMessage(null);
+	setErrorInfo(null);
+}, []);
+
+/**
+ * Check if paths should be converted to WSL format.
+ */
 	const shouldConvertToWsl = useMemo(() => {
 		return Platform.isWin && settingsContext.windowsWslMode;
 	}, [settingsContext.windowsWslMode]);
@@ -686,6 +705,7 @@ export function useChat(
 		isSending,
 		lastUserMessage,
 		errorInfo,
+		resetSendingState,
 		sendMessage,
 		clearMessages,
 		setInitialMessages,
