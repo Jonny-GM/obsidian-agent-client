@@ -24,13 +24,16 @@ export interface EditorPosition {
  * exposing Obsidian's internal TFile structure.
  */
 export interface NoteMetadata {
+	/** Whether this metadata represents a file or folder */
+	kind: "file" | "folder";
+
 	/** Full path to the note within the vault (e.g., "folder/note.md") */
 	path: string;
 
 	/** Filename without extension (e.g., "note") */
 	name: string;
 
-	/** File extension (usually "md") */
+	/** File extension (usually "md") or empty for folders */
 	extension: string;
 
 	/** Creation timestamp (milliseconds since epoch) */
@@ -67,7 +70,7 @@ export interface IVaultAccess {
 	readNote(path: string): Promise<string>;
 
 	/**
-	 * Search for notes matching a query.
+	 * Search for notes and folders matching a query.
 	 *
 	 * Uses fuzzy search against note names, paths, and aliases.
 	 * Returns up to 5 best matches sorted by relevance.

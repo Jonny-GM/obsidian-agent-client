@@ -839,7 +839,7 @@ export function ChatInput({
 
 
 	// Placeholder text
-	const placeholder = `Message ${agentLabel} - @ to mention notes${availableCommands.length > 0 ? ", / for commands" : ""}`;
+	const placeholder = `Message ${agentLabel} - @ to mention notes or folders${availableCommands.length > 0 ? ", / for commands" : ""}`;
 
 	return (
 		<div className="agent-client-chat-input-container">

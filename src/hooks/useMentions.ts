@@ -84,7 +84,9 @@ export function useMentions(
 				return input;
 			}
 
-			const { newText } = replaceMention(input, context, suggestion.name);
+			const mentionText =
+				suggestion.kind === "folder" ? suggestion.path : suggestion.name;
+			const { newText } = replaceMention(input, context, mentionText);
 
 			setSuggestions([]);
 			setSelectedIndex(0);
