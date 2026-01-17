@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from "child_process";
+import type { ChildProcess } from "child_process";
 import * as acp from "@agentclientprotocol/sdk";
 import { Platform } from "obsidian";
 
@@ -25,6 +25,7 @@ import { AcpTypeConverter } from "./acp-type-converter";
 import { TerminalManager } from "../../shared/terminal-manager";
 import { Logger } from "../../shared/logger";
 import type AgentClientPlugin from "../../plugin";
+import type { AcpBridgeSettings } from "../../plugin";
 import type {
 	SlashCommand,
 	SessionModeState,
@@ -73,6 +74,9 @@ export interface IAcpClient extends acp.Client {
 export class AcpAdapter implements IAgentClient, IAcpClient {
 	private connection: acp.ClientSideConnection | null = null;
 	private agentProcess: ChildProcess | null = null;
+	private bridgeSocket: WebSocket | null = null;
+	private bridgeHealthInterval: ReturnType<typeof setInterval> | null = null;
+	private usingBridge = false;
 	private logger: Logger;
 
 	// Session update callback (unified callback for all session updates)
@@ -120,6 +124,169 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		this.terminalManager = new TerminalManager(plugin);
 	}
 
+	private getBridgeSettings(): AcpBridgeSettings {
+		return Platform.isMobileApp
+			? this.plugin.settings.acpBridge.mobile
+			: this.plugin.settings.acpBridge.desktop;
+	}
+
+	private buildBridgeUrl(settings: AcpBridgeSettings): string {
+		const host = settings.host.trim() || "127.0.0.1";
+		const url = new URL(`ws://${host}:${settings.port}/`);
+		if (settings.token.trim().length > 0) {
+			url.searchParams.set("token", settings.token.trim());
+		}
+		return url.toString();
+	}
+
+	private clearBridgeHealthCheck(): void {
+		if (this.bridgeHealthInterval) {
+			clearInterval(this.bridgeHealthInterval);
+			this.bridgeHealthInterval = null;
+		}
+	}
+
+	private handleBridgeDisconnect(
+		title: string,
+		message: string,
+		agentId?: string,
+	): void {
+		const shouldReport = this.usingBridge && this.isInitializedFlag;
+		if (this.bridgeSocket) {
+			this.bridgeSocket.close();
+			this.bridgeSocket = null;
+		}
+
+		this.clearBridgeHealthCheck();
+
+		if (this.connection) {
+			this.connection = null;
+		}
+
+		this.isInitializedFlag = false;
+		this.currentAgentId = null;
+
+		if (!shouldReport) {
+			return;
+		}
+
+		const agentError: AgentError = {
+			id: crypto.randomUUID(),
+			category: "connection",
+			severity: "error",
+			title,
+			message,
+			occurredAt: new Date(),
+			agentId,
+		};
+		this.errorCallback?.(agentError);
+	}
+
+	private startBridgeHealthCheck(
+		socket: WebSocket,
+		agentLabel: string,
+		agentId: string,
+	): void {
+		this.clearBridgeHealthCheck();
+		this.bridgeHealthInterval = setInterval(() => {
+			if (socket.readyState === WebSocket.OPEN) {
+				return;
+			}
+			if (socket.readyState === WebSocket.CONNECTING) {
+				return;
+			}
+			this.handleBridgeDisconnect(
+				"ACP bridge connection closed",
+				`The ACP bridge connection closed for ${agentLabel}.`,
+				agentId,
+			);
+		}, 3000);
+	}
+
+	private createBridgeStream(
+		url: string,
+		config: AgentConfig,
+	): {
+		stream: acp.Stream;
+		socket: WebSocket;
+	} {
+		const socket = new WebSocket(url);
+		socket.binaryType = "arraybuffer";
+		const textEncoder = new TextEncoder();
+		const agentLabel = `${config.displayName} (${config.id})`;
+
+		const openPromise = new Promise<void>((resolve, reject) => {
+			socket.addEventListener("open", () => resolve());
+			socket.addEventListener("error", () =>
+				reject(new Error("ACP bridge connection error")),
+			);
+		});
+
+		const input = new ReadableStream<Uint8Array>({
+			start: (controller) => {
+				const handleMessage = (event: MessageEvent) => {
+					if (event.data instanceof ArrayBuffer) {
+						controller.enqueue(new Uint8Array(event.data));
+						return;
+					}
+					if (event.data instanceof Blob) {
+						void event.data.arrayBuffer().then((buffer) => {
+							controller.enqueue(new Uint8Array(buffer));
+						});
+						return;
+					}
+					if (typeof event.data === "string") {
+						controller.enqueue(textEncoder.encode(event.data));
+					}
+				};
+				const handleClose = () => {
+					this.handleBridgeDisconnect(
+						"ACP bridge connection closed",
+						`The ACP bridge connection closed for ${agentLabel}.`,
+						config.id,
+					);
+					controller.close();
+				};
+				const handleError = () => {
+					this.handleBridgeDisconnect(
+						"ACP bridge connection error",
+						`Failed to communicate with ACP bridge for ${agentLabel}.`,
+						config.id,
+					);
+					controller.error(
+						new Error("ACP bridge connection error"),
+					);
+				};
+
+				socket.addEventListener("message", handleMessage);
+				socket.addEventListener("close", handleClose);
+				socket.addEventListener("error", handleError);
+				this.startBridgeHealthCheck(socket, agentLabel, config.id);
+			},
+			cancel: () => {
+				socket.close();
+			},
+		});
+
+		const output = new WritableStream<Uint8Array>({
+			write: async (chunk) => {
+				await openPromise;
+				socket.send(chunk);
+			},
+			close: () => {
+				socket.close();
+			},
+			abort: () => {
+				socket.close();
+			},
+		});
+
+		return {
+			stream: acp.ndJsonStream(output, input),
+			socket,
+		};
+	}
+
 	/**
 	 * Set the update message callback for permission UI updates.
 	 *
@@ -156,6 +323,13 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 			this.agentProcess = null;
 		}
 
+		if (this.bridgeSocket) {
+			this.logger.log("[AcpAdapter] Closing existing ACP bridge socket");
+			this.bridgeSocket.close();
+			this.bridgeSocket = null;
+		}
+		this.clearBridgeHealthCheck();
+
 		// Clean up existing connection
 		if (this.connection) {
 			this.logger.log("[AcpAdapter] Cleaning up existing connection");
@@ -163,32 +337,52 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		}
 
 		this.currentConfig = config;
+		this.usingBridge = false;
 
 		// Update auto-allow permissions from plugin settings
 		this.autoAllowPermissions = this.plugin.settings.autoAllowPermissions;
 
-		// Validate command
-		if (!config.command || config.command.trim().length === 0) {
+		const bridgeSettings = this.getBridgeSettings();
+		const useBridge = bridgeSettings.enabled;
+		this.usingBridge = useBridge;
+
+		if (Platform.isMobileApp && !useBridge) {
 			throw new Error(
-				`Command not configured for agent "${config.displayName}" (${config.id}). Please configure the agent command in settings.`,
+				"ACP bridge is required on mobile. Enable ACP bridge in settings to connect.",
 			);
 		}
 
-		const command = config.command.trim();
-		const args = config.args.length > 0 ? [...config.args] : [];
+		let command = "";
+		let args: string[] = [];
 
-		this.logger.log(
-			`[AcpAdapter] Active agent: ${config.displayName} (${config.id})`,
-		);
-		this.logger.log("[AcpAdapter] Command:", command);
-		this.logger.log(
-			"[AcpAdapter] Args:",
-			args.length > 0 ? args.join(" ") : "(none)",
-		);
+		if (!useBridge) {
+			// Validate command
+			if (!config.command || config.command.trim().length === 0) {
+				throw new Error(
+					`Command not configured for agent "${config.displayName}" (${config.id}). Please configure the agent command in settings.`,
+				);
+			}
+
+			command = config.command.trim();
+			args = config.args.length > 0 ? [...config.args] : [];
+
+			this.logger.log(
+				`[AcpAdapter] Active agent: ${config.displayName} (${config.id})`,
+			);
+			this.logger.log("[AcpAdapter] Command:", command);
+			this.logger.log(
+				"[AcpAdapter] Args:",
+				args.length > 0 ? args.join(" ") : "(none)",
+			);
+		} else {
+			this.logger.log(
+				`[AcpAdapter] Using ACP bridge for agent: ${config.displayName} (${config.id})`,
+			);
+		}
 
 		// Prepare environment variables
 		let baseEnv: NodeJS.ProcessEnv = {
-			...process.env,
+			...(Platform.isDesktopApp ? process.env : {}),
 			...(config.env || {}),
 		};
 
@@ -215,210 +409,226 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 			}
 		}
 
-		this.logger.log(
-			"[AcpAdapter] Starting agent process in directory:",
-			config.workingDirectory,
-		);
-
-		// Prepare command and args for spawning
-		let spawnCommand = command;
-		let spawnArgs = args;
-
-		// WSL mode for Windows (wrap command to run inside WSL)
-		if (Platform.isWin && this.plugin.settings.windowsWslMode) {
-			// Extract node directory from settings for PATH
-			const nodeDir = this.plugin.settings.nodePath
-				? resolveCommandDirectory(
-						this.plugin.settings.nodePath.trim(),
-					) || undefined
-				: undefined;
-
-			const wslWrapped = wrapCommandForWsl(
-				command,
-				args,
-				config.workingDirectory,
-				this.plugin.settings.windowsWslDistribution,
-				nodeDir,
-			);
-			spawnCommand = wslWrapped.command;
-			spawnArgs = wslWrapped.args;
+		if (!useBridge) {
 			this.logger.log(
-				"[AcpAdapter] Using WSL mode:",
-				this.plugin.settings.windowsWslDistribution || "default",
-				"with command:",
-				spawnCommand,
-				spawnArgs,
+				"[AcpAdapter] Starting agent process in directory:",
+				config.workingDirectory,
 			);
 		}
-		// On macOS and Linux, wrap the command in a login shell to inherit the user's environment
-		// This ensures that PATH modifications in .zshrc/.bash_profile are available
-		else if (Platform.isMacOS || Platform.isLinux) {
-			const shell = Platform.isMacOS ? "/bin/zsh" : "/bin/bash";
-			const commandString = [command, ...args]
-				.map((arg) => "'" + arg.replace(/'/g, "'\\''") + "'")
-				.join(" ");
 
-			// If nodePath is configured, prepend PATH export to ensure node is available.
-			// This is necessary because:
-			// 1. Login shells (-l) re-initialize PATH from shell config files, overwriting env.PATH
-			// 2. Even when the agent command uses an absolute path, scripts with shebang
-			//    "#!/usr/bin/env node" require node to be in PATH for the env command to find it
-			// Therefore, we must explicitly set PATH inside the shell command
-			let fullCommand = commandString;
-			if (
-				this.plugin.settings.nodePath &&
-				this.plugin.settings.nodePath.trim().length > 0
-			) {
-				const nodeDir = resolveCommandDirectory(
-					this.plugin.settings.nodePath.trim(),
+		if (useBridge) {
+			const url = this.buildBridgeUrl(bridgeSettings);
+			this.logger.log("[AcpAdapter] Connecting to ACP bridge:", url);
+			const { stream, socket } = this.createBridgeStream(url, config);
+			this.bridgeSocket = socket;
+
+			this.connection = new acp.ClientSideConnection(() => this, stream);
+		} else {
+			const { spawn } = require("child_process") as typeof import("child_process");
+
+
+			// Prepare command and args for spawning
+			let spawnCommand = command;
+			let spawnArgs = args;
+
+			// WSL mode for Windows (wrap command to run inside WSL)
+			if (Platform.isWin && this.plugin.settings.windowsWslMode) {
+				// Extract node directory from settings for PATH
+				const nodeDir = this.plugin.settings.nodePath
+					? resolveCommandDirectory(
+							this.plugin.settings.nodePath.trim(),
+						) || undefined
+					: undefined;
+
+				const wslWrapped = wrapCommandForWsl(
+					command,
+					args,
+					config.workingDirectory,
+					this.plugin.settings.windowsWslDistribution,
+					nodeDir,
 				);
-				if (nodeDir) {
-					// Escape single quotes in nodeDir for shell safety
-					const escapedNodeDir = nodeDir.replace(/'/g, "'\\''");
-					fullCommand = `export PATH='${escapedNodeDir}':"$PATH"; ${commandString}`;
+				spawnCommand = wslWrapped.command;
+				spawnArgs = wslWrapped.args;
+				this.logger.log(
+					"[AcpAdapter] Using WSL mode:",
+					this.plugin.settings.windowsWslDistribution || "default",
+					"with command:",
+					spawnCommand,
+					spawnArgs,
+				);
+			}
+			// On macOS and Linux, wrap the command in a login shell to inherit the user's environment
+			// This ensures that PATH modifications in .zshrc/.bash_profile are available
+			else if (Platform.isMacOS || Platform.isLinux) {
+				const shell = Platform.isMacOS ? "/bin/zsh" : "/bin/bash";
+				const commandString = [command, ...args]
+					.map((arg) => "'" + arg.replace(/'/g, "'\\''") + "'")
+					.join(" ");
+
+				// If nodePath is configured, prepend PATH export to ensure node is available.
+				// This is necessary because:
+				// 1. Login shells (-l) re-initialize PATH from shell config files, overwriting env.PATH
+				// 2. Even when the agent command uses an absolute path, scripts with shebang
+				//    "#!/usr/bin/env node" require node to be in PATH for the env command to find it
+				// Therefore, we must explicitly set PATH inside the shell command
+				let fullCommand = commandString;
+				if (
+					this.plugin.settings.nodePath &&
+					this.plugin.settings.nodePath.trim().length > 0
+				) {
+					const nodeDir = resolveCommandDirectory(
+						this.plugin.settings.nodePath.trim(),
+					);
+					if (nodeDir) {
+						// Escape single quotes in nodeDir for shell safety
+						const escapedNodeDir = nodeDir.replace(/'/g, "'\\''");
+						fullCommand = `export PATH='${escapedNodeDir}':"$PATH"; ${commandString}`;
+					}
 				}
+
+				spawnCommand = shell;
+				spawnArgs = ["-l", "-c", fullCommand];
+				this.logger.log(
+					"[AcpAdapter] Using login shell:",
+					shell,
+					"with command:",
+					fullCommand,
+				);
+			}
+			// On Windows (non-WSL), escape command and arguments for cmd.exe
+			// spawn() will be called with shell: true below
+			else if (Platform.isWin) {
+				spawnCommand = escapeShellArgWindows(command);
+				spawnArgs = args.map(escapeShellArgWindows);
+				this.logger.log(
+					"[AcpAdapter] Using Windows shell with command:",
+					spawnCommand,
+					spawnArgs,
+				);
 			}
 
-			spawnCommand = shell;
-			spawnArgs = ["-l", "-c", fullCommand];
-			this.logger.log(
-				"[AcpAdapter] Using login shell:",
-				shell,
-				"with command:",
-				fullCommand,
-			);
-		}
-		// On Windows (non-WSL), escape command and arguments for cmd.exe
-		// spawn() will be called with shell: true below
-		else if (Platform.isWin) {
-			spawnCommand = escapeShellArgWindows(command);
-			spawnArgs = args.map(escapeShellArgWindows);
-			this.logger.log(
-				"[AcpAdapter] Using Windows shell with command:",
-				spawnCommand,
-				spawnArgs,
-			);
-		}
+			// Use shell on Windows for proper argument handling, but NOT in WSL mode
+			// When using WSL, wsl.exe is the command and doesn't need shell wrapper
+			const needsShell =
+				Platform.isWin && !this.plugin.settings.windowsWslMode;
 
-		// Use shell on Windows for proper argument handling, but NOT in WSL mode
-		// When using WSL, wsl.exe is the command and doesn't need shell wrapper
-		const needsShell =
-			Platform.isWin && !this.plugin.settings.windowsWslMode;
+			// Spawn the agent process
+			const agentProcess = spawn(spawnCommand, spawnArgs, {
+				stdio: ["pipe", "pipe", "pipe"],
+				env: baseEnv,
+				cwd: config.workingDirectory,
+				shell: needsShell,
+			});
+			this.agentProcess = agentProcess;
 
-		// Spawn the agent process
-		const agentProcess = spawn(spawnCommand, spawnArgs, {
-			stdio: ["pipe", "pipe", "pipe"],
-			env: baseEnv,
-			cwd: config.workingDirectory,
-			shell: needsShell,
-		});
-		this.agentProcess = agentProcess;
+			const agentLabel = `${config.displayName} (${config.id})`;
 
-		const agentLabel = `${config.displayName} (${config.id})`;
+			// Set up process event handlers
+			agentProcess.on("spawn", () => {
+				this.logger.log(
+					`[AcpAdapter] ${agentLabel} process spawned successfully, PID:`,
+					agentProcess.pid,
+				);
+			});
 
-		// Set up process event handlers
-		agentProcess.on("spawn", () => {
-			this.logger.log(
-				`[AcpAdapter] ${agentLabel} process spawned successfully, PID:`,
-				agentProcess.pid,
-			);
-		});
-
-		agentProcess.on("error", (error) => {
-			this.logger.error(
-				`[AcpAdapter] ${agentLabel} process error:`,
-				error,
-			);
-
-			const agentError: AgentError = {
-				id: crypto.randomUUID(),
-				category: "connection",
-				severity: "error",
-				occurredAt: new Date(),
-				agentId: config.id,
-				originalError: error,
-				...this.getErrorInfo(error, command, agentLabel),
-			};
-
-			this.errorCallback?.(agentError);
-		});
-
-		agentProcess.on("exit", (code, signal) => {
-			this.logger.log(
-				`[AcpAdapter] ${agentLabel} process exited with code:`,
-				code,
-				"signal:",
-				signal,
-			);
-
-			if (code === 127) {
-				this.logger.error(`[AcpAdapter] Command not found: ${command}`);
+			agentProcess.on("error", (error) => {
+				this.logger.error(
+					`[AcpAdapter] ${agentLabel} process error:`,
+					error,
+				);
 
 				const agentError: AgentError = {
 					id: crypto.randomUUID(),
-					category: "configuration",
+					category: "connection",
 					severity: "error",
-					title: "Command Not Found",
-					message: `The command "${command}" could not be found. Please check the path configuration for ${agentLabel}.`,
-					suggestion: this.getCommandNotFoundSuggestion(command),
 					occurredAt: new Date(),
 					agentId: config.id,
-					code: code,
+					originalError: error,
+					...this.getErrorInfo(error, command, agentLabel),
 				};
 
 				this.errorCallback?.(agentError);
+			});
+
+			agentProcess.on("exit", (code, signal) => {
+				this.logger.log(
+					`[AcpAdapter] ${agentLabel} process exited with code:`,
+					code,
+					"signal:",
+					signal,
+				);
+
+				if (code === 127) {
+					this.logger.error(
+						`[AcpAdapter] Command not found: ${command}`,
+					);
+
+					const agentError: AgentError = {
+						id: crypto.randomUUID(),
+						category: "configuration",
+						severity: "error",
+						title: "Command Not Found",
+						message: `The command "${command}" could not be found. Please check the path configuration for ${agentLabel}.`,
+						suggestion: this.getCommandNotFoundSuggestion(command),
+						occurredAt: new Date(),
+						agentId: config.id,
+						code: code,
+					};
+
+					this.errorCallback?.(agentError);
+				}
+			});
+
+			agentProcess.on("close", (code, signal) => {
+				this.logger.log(
+					`[AcpAdapter] ${agentLabel} process closed with code:`,
+					code,
+					"signal:",
+					signal,
+				);
+			});
+
+			agentProcess.stderr?.setEncoding("utf8");
+			agentProcess.stderr?.on("data", (data) => {
+				this.logger.log(`[AcpAdapter] ${agentLabel} stderr:`, data);
+			});
+
+			// Create stream for ACP communication
+			// stdio is configured as ["pipe", "pipe", "pipe"] so stdin/stdout are guaranteed to exist
+			if (!agentProcess.stdin || !agentProcess.stdout) {
+				throw new Error("Agent process stdin/stdout not available");
 			}
-		});
 
-		agentProcess.on("close", (code, signal) => {
+			const stdin = agentProcess.stdin;
+			const stdout = agentProcess.stdout;
+
+			const input = new WritableStream<Uint8Array>({
+				write(chunk: Uint8Array) {
+					stdin.write(chunk);
+				},
+				close() {
+					stdin.end();
+				},
+			});
+			const output = new ReadableStream<Uint8Array>({
+				start(controller) {
+					stdout.on("data", (chunk: Uint8Array) => {
+						controller.enqueue(chunk);
+					});
+					stdout.on("end", () => {
+						controller.close();
+					});
+				},
+			});
+
 			this.logger.log(
-				`[AcpAdapter] ${agentLabel} process closed with code:`,
-				code,
-				"signal:",
-				signal,
+				"[AcpAdapter] Using working directory:",
+				config.workingDirectory,
 			);
-		});
 
-		agentProcess.stderr?.setEncoding("utf8");
-		agentProcess.stderr?.on("data", (data) => {
-			this.logger.log(`[AcpAdapter] ${agentLabel} stderr:`, data);
-		});
-
-		// Create stream for ACP communication
-		// stdio is configured as ["pipe", "pipe", "pipe"] so stdin/stdout are guaranteed to exist
-		if (!agentProcess.stdin || !agentProcess.stdout) {
-			throw new Error("Agent process stdin/stdout not available");
+			const stream = acp.ndJsonStream(input, output);
+			this.connection = new acp.ClientSideConnection(() => this, stream);
 		}
-
-		const stdin = agentProcess.stdin;
-		const stdout = agentProcess.stdout;
-
-		const input = new WritableStream<Uint8Array>({
-			write(chunk: Uint8Array) {
-				stdin.write(chunk);
-			},
-			close() {
-				stdin.end();
-			},
-		});
-		const output = new ReadableStream<Uint8Array>({
-			start(controller) {
-				stdout.on("data", (chunk: Uint8Array) => {
-					controller.enqueue(chunk);
-				});
-				stdout.on("end", () => {
-					controller.close();
-				});
-			},
-		});
-
-		this.logger.log(
-			"[AcpAdapter] Using working directory:",
-			config.workingDirectory,
-		);
-
-		const stream = acp.ndJsonStream(input, output);
-		this.connection = new acp.ClientSideConnection(() => this, stream);
 
 		try {
 			this.logger.log("[AcpAdapter] Starting ACP initialization...");
@@ -751,6 +961,13 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 			this.agentProcess = null;
 		}
 
+		if (this.bridgeSocket) {
+			this.logger.log("[AcpAdapter] Closing ACP bridge socket");
+			this.bridgeSocket.close();
+			this.bridgeSocket = null;
+		}
+		this.clearBridgeHealthCheck();
+
 		// Clear connection and config references
 		this.connection = null;
 		this.currentConfig = null;
@@ -758,6 +975,7 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		// Reset initialization state
 		this.isInitializedFlag = false;
 		this.currentAgentId = null;
+		this.usingBridge = false;
 
 		this.logger.log("[AcpAdapter] Disconnected");
 		return Promise.resolve();
@@ -772,7 +990,7 @@ export class AcpAdapter implements IAgentClient, IAcpClient {
 		return (
 			this.isInitializedFlag &&
 			this.connection !== null &&
-			this.agentProcess !== null
+			(this.agentProcess !== null || this.usingBridge)
 		);
 	}
 

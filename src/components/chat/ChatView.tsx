@@ -63,13 +63,6 @@ function ChatComponent({
 	view: ChatView;
 }) {
 	// ============================================================
-	// Platform Check
-	// ============================================================
-	if (!Platform.isDesktopApp) {
-		throw new Error("Agent Client is only available on desktop");
-	}
-
-	// ============================================================
 	// Memoized Services & Adapters
 	// ============================================================
 	const logger = useMemo(() => new Logger(plugin), [plugin]);
@@ -77,7 +70,7 @@ function ChatComponent({
 	const vaultPath = useMemo(() => {
 		return (
 			(plugin.app.vault.adapter as VaultAdapterWithBasePath).basePath ||
-			process.cwd()
+			(Platform.isDesktopApp ? process.cwd() : "")
 		);
 	}, [plugin]);
 
@@ -104,6 +97,8 @@ function ChatComponent({
 	// Custom Hooks
 	// ============================================================
 	const settings = useSettings(plugin);
+	const requiresBridgeOnMobile =
+		Platform.isMobileApp && !settings.acpBridge.mobile.enabled;
 
 	const agentSession = useAgentSession(
 		acpAdapter,
@@ -115,6 +110,8 @@ function ChatComponent({
 		session,
 		errorInfo: sessionErrorInfo,
 		isReady: isSessionReady,
+		reconnectStatus,
+		isBridgeEnabled,
 	} = agentSession;
 
 	const chat = useChat(
@@ -134,6 +131,8 @@ function ChatComponent({
 	);
 
 	const { messages, isSending } = chat;
+	const chatRef = useRef(chat);
+	chatRef.current = chat;
 
 	const permission = usePermission(acpAdapter, messages);
 
@@ -223,6 +222,9 @@ function ChatComponent({
 	// ============================================================
 	/** Ref for session history modal (persisted across renders) */
 	const historyModalRef = useRef<SessionHistoryModal | null>(null);
+	const pendingSessionResolver = useRef<
+		((sessionId: string | null) => void) | null
+	>(null);
 
 	// ============================================================
 	// Computed Values
@@ -249,6 +251,9 @@ function ChatComponent({
 		);
 		return custom?.displayName || custom?.id || activeId;
 	}, [session.agentId, plugin.settings]);
+
+	const canStartSessionOnMobile =
+		Platform.isMobileApp && !requiresBridgeOnMobile;
 
 	// ============================================================
 	// Callbacks
@@ -492,7 +497,41 @@ function ChatComponent({
 		async (content: string, images?: ImagePromptContent[]) => {
 			const isFirstMessage = messages.length === 0;
 
-			await chat.sendMessage(content, {
+			const waitForSessionReady = (): Promise<string | null> => {
+				if (session.sessionId) {
+					return Promise.resolve(session.sessionId);
+				}
+				return new Promise((resolve) => {
+					pendingSessionResolver.current = resolve;
+				});
+			};
+
+			const ensureSessionReady = async (): Promise<boolean> => {
+				if (session.sessionId) {
+					return true;
+				}
+				if (
+					session.state === "initializing" ||
+					session.state === "authenticating"
+				) {
+					return (await waitForSessionReady()) !== null;
+				}
+				if (requiresBridgeOnMobile) {
+					return false;
+				}
+				if (!canStartSessionOnMobile && !isBridgeEnabled) {
+					return false;
+				}
+				await agentSession.createSession();
+				return (await waitForSessionReady()) !== null;
+			};
+
+			const ready = await ensureSessionReady();
+			if (!ready) {
+				return;
+			}
+
+			await chatRef.current.sendMessage(content, {
 				activeNote: autoMention.activeNote,
 				vaultBasePath:
 					(plugin.app.vault.adapter as VaultAdapterWithBasePath)
@@ -513,13 +552,17 @@ function ChatComponent({
 			}
 		},
 		[
-			chat,
+			agentSession,
 			autoMention,
-			plugin,
-			messages.length,
-			session.sessionId,
-			sessionHistory,
+			canStartSessionOnMobile,
 			logger,
+			messages.length,
+			isBridgeEnabled,
+			plugin,
+			requiresBridgeOnMobile,
+			session.sessionId,
+			session.state,
+			sessionHistory,
 		],
 	);
 
@@ -547,9 +590,41 @@ function ChatComponent({
 	// ============================================================
 	// Initialize session on mount or when agent changes
 	useEffect(() => {
+		if (requiresBridgeOnMobile || isBridgeEnabled) {
+			return;
+		}
+
 		logger.log("[Debug] Starting connection setup via useAgentSession...");
 		void agentSession.createSession();
-	}, [session.agentId, agentSession.createSession]);
+	}, [
+		session.agentId,
+		agentSession.createSession,
+		isBridgeEnabled,
+		requiresBridgeOnMobile,
+	]);
+
+	useEffect(() => {
+		if (!pendingSessionResolver.current) {
+			return;
+		}
+		if (session.sessionId) {
+			pendingSessionResolver.current(session.sessionId);
+			pendingSessionResolver.current = null;
+			return;
+		}
+		if (session.state === "error") {
+			pendingSessionResolver.current(null);
+			pendingSessionResolver.current = null;
+		}
+	}, [session.sessionId, session.state]);
+
+	useEffect(() => {
+		if (requiresBridgeOnMobile) {
+			new Notice(
+				"[Agent Client] ACP bridge is required on mobile. Enable it in settings.",
+			);
+		}
+	}, [requiresBridgeOnMobile]);
 
 	// Refs for cleanup (to access latest values in cleanup function)
 	const messagesRef = useRef(messages);
@@ -800,10 +875,16 @@ function ChatComponent({
 				agentLabel={activeAgentLabel}
 				isUpdateAvailable={isUpdateAvailable}
 				hasHistoryCapability={sessionHistory.canShowSessionHistory}
+				sessionState={session.state}
+				reconnectStatus={reconnectStatus}
+				isBridgeEnabled={isBridgeEnabled}
+				canStartSession={canStartSessionOnMobile}
 				onNewChat={() => void handleNewChat()}
 				onExportChat={() => void handleExportChat()}
 				onOpenSettings={handleOpenSettings}
 				onOpenHistory={handleOpenHistory}
+				onReconnectNow={() => void agentSession.reconnectNow()}
+				onCancelReconnect={agentSession.cancelReconnect}
 			/>
 
 			<ChatMessages
@@ -824,6 +905,7 @@ function ChatComponent({
 				isSending={isSending}
 				isSessionReady={isSessionReady}
 				isRestoringSession={sessionHistory.loading}
+				canStartSession={canStartSessionOnMobile}
 				agentLabel={activeAgentLabel}
 				availableCommands={session.availableCommands || []}
 				autoMentionEnabled={settings.autoMentionActiveNote}

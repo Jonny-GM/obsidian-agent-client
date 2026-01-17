@@ -6,7 +6,11 @@ import {
 	Platform,
 } from "obsidian";
 import type AgentClientPlugin from "../../plugin";
-import type { CustomAgentSettings, AgentEnvVar } from "../../plugin";
+import type {
+	CustomAgentSettings,
+	AgentEnvVar,
+	AcpBridgeSettings,
+} from "../../plugin";
 import { normalizeEnvVars } from "../../shared/settings-utils";
 
 export class AgentClientSettingTab extends PluginSettingTab {
@@ -69,6 +73,28 @@ export class AgentClientSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+
+		new Setting(containerEl)
+			.setName("ACP bridge")
+			.setDesc(
+				"Connect to agents via acp-bridge over WebSocket instead of spawning local processes.",
+			)
+			.setHeading();
+
+		this.renderAcpBridgeSettings(
+			containerEl,
+			"Desktop",
+			this.plugin.settings.acpBridge.desktop,
+			Platform.isDesktopApp,
+		);
+
+		this.renderAcpBridgeSettings(
+			containerEl,
+			"Mobile",
+			this.plugin.settings.acpBridge.mobile,
+			Platform.isMobileApp,
+		);
+
 
 		new Setting(containerEl)
 			.setName("Send message shortcut")
@@ -805,6 +831,77 @@ export class AgentClientSettingTab extends PluginSettingTab {
 					this.display();
 				});
 		});
+	}
+
+	private renderAcpBridgeSettings(
+		containerEl: HTMLElement,
+		label: string,
+		settings: AcpBridgeSettings,
+		isActivePlatform: boolean,
+	) {
+		const platformSuffix = isActivePlatform ? " (active)" : "";
+		new Setting(containerEl)
+			.setName(`${label}${platformSuffix}`)
+			.setHeading();
+
+		new Setting(containerEl)
+			.setName("Enable ACP bridge")
+			.setDesc(
+				"Use a WebSocket connection to an acp-bridge daemon for this platform.",
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(settings.enabled).onChange(async (value) => {
+					settings.enabled = value;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Host")
+			.setDesc("Host where acp-bridge is listening.")
+			.addText((text) =>
+				text
+					.setPlaceholder("127.0.0.1")
+					.setValue(settings.host)
+					.onChange(async (value) => {
+						settings.host = value.trim() || "127.0.0.1";
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Port")
+			.setDesc("Port where acp-bridge is listening.")
+			.addText((text) => {
+				text.setPlaceholder("27123")
+					.setValue(String(settings.port))
+					.onChange(async (value) => {
+						const parsed = Number.parseInt(value, 10);
+						if (Number.isFinite(parsed) && parsed > 0) {
+							settings.port = parsed;
+						}
+						await this.plugin.saveSettings();
+						if (!Number.isFinite(parsed) || parsed <= 0) {
+							text.setValue(String(settings.port));
+						}
+					});
+				text.inputEl.type = "number";
+				text.inputEl.min = "1";
+				text.inputEl.max = "65535";
+			});
+
+		new Setting(containerEl)
+			.setName("Token")
+			.setDesc("Optional token for non-loopback bindings.")
+			.addText((text) => {
+				text.setPlaceholder("Leave empty if unused")
+					.setValue(settings.token)
+					.onChange(async (value) => {
+						settings.token = value.trim();
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.type = "password";
+			});
 	}
 
 	private renderCustomAgent(

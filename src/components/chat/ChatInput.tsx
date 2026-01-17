@@ -52,6 +52,8 @@ export interface ChatInputProps {
 	isSessionReady: boolean;
 	/** Whether a session is being restored (load/resume/fork) */
 	isRestoringSession: boolean;
+	/** Whether user can start a session from the input */
+	canStartSession?: boolean;
 	/** Display name of the active agent */
 	agentLabel: string;
 	/** Available slash commands */
@@ -109,6 +111,7 @@ export function ChatInput({
 	isSending,
 	isSessionReady,
 	isRestoringSession,
+	canStartSession = false,
 	agentLabel,
 	availableCommands,
 	autoMentionEnabled,
@@ -577,11 +580,12 @@ export function ChatInput({
 		[slashCommands, mentions, handleSelectSlashCommand, selectMention],
 	);
 
-	// Button disabled state - also allow sending if images are attached
+	// Button disabled state - allow sending on mobile when session can be started
+	const canSendMessage = isSessionReady || canStartSession;
 	const isButtonDisabled =
 		!isSending &&
 		((inputValue.trim() === "" && attachedImages.length === 0) ||
-			!isSessionReady ||
+			!canSendMessage ||
 			isRestoringSession);
 
 	/**
@@ -832,6 +836,7 @@ export function ChatInput({
 			modelDropdownInstance.current.setValue(currentModelId);
 		}
 	}, [currentModelId]);
+
 
 	// Placeholder text
 	const placeholder = `Message ${agentLabel} - @ to mention notes${availableCommands.length > 0 ? ", / for commands" : ""}`;
