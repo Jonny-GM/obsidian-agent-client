@@ -86,6 +86,7 @@ Implements IAgentClient + IAcpClient (terminal ops)
 - **Updates**: agent_message_chunk, agent_thought_chunk, tool_call, tool_call_update, plan, available_commands_update
 - **Permissions**: Promise-based Map<requestId, resolver>
 - **Terminal**: createTerminal, terminalOutput, killTerminal, releaseTerminal
+- **Session History**: ACP SDK v0.12 exposes session APIs under `unstable_*` (setSessionModel, listSessions, resumeSession, forkSession).
 
 ### Obsidian Adapters (`adapters/obsidian/`)
 
@@ -138,6 +139,7 @@ interface ISettingsAccess {
 
 ### Build Verification
 - Run `npm ci` first to install dependencies, then `npm run build` after documentation or code changes to ensure type checks and bundled output stay in sync.
+- CI uses Node 18 with npm 10; if `npm ci` fails due to lockfile drift, regenerate with `npx npm@10.8.2 install --package-lock-only` and commit the updated lockfile.
 
 ### Obsidian Plugin Review (CRITICAL)
 1. No innerHTML/outerHTML - use createEl/createDiv/createSpan
