@@ -13,7 +13,7 @@ import type {
 	ChatMessage,
 	MessageContent,
 } from "../../domain/models/chat-message";
-import type { SavedSessionInfo } from "../../domain/models/session-info";
+import type { SessionInfo } from "../../domain/models/session-info";
 
 /** Listener callback invoked when settings change */
 type Listener = () => void;
@@ -27,6 +27,7 @@ interface SessionMessagesFile {
 	version: number;
 	sessionId: string;
 	agentId: string;
+	cwd?: string;
 	messages: Array<{
 		id: string;
 		role: "user" | "assistant";
@@ -140,86 +141,76 @@ export class SettingsStore implements ISettingsAccess {
 	// Session Storage Methods
 	// ============================================================
 
-	/** Maximum number of saved sessions to keep */
-	private static readonly MAX_SAVED_SESSIONS = 50;
-
 	/**
-	 * Save a session to local storage.
-	 *
-	 * Updates existing session if sessionId matches.
-	 * Maintains max 50 sessions, removing oldest when exceeded.
-	 *
-	 * @param info - Session metadata to save
-	 * @returns Promise that resolves when session is saved
-	 */
-	async saveSession(info: SavedSessionInfo): Promise<void> {
-		const sessions = [...(this.state.savedSessions || [])];
-
-		// Find existing session by sessionId
-		const existingIndex = sessions.findIndex(
-			(s) => s.sessionId === info.sessionId,
-		);
-
-		if (existingIndex >= 0) {
-			// Update existing session
-			sessions[existingIndex] = info;
-		} else {
-			// Add new session at the beginning
-			sessions.unshift(info);
-
-			// Remove oldest sessions if exceeding limit
-			if (sessions.length > SettingsStore.MAX_SAVED_SESSIONS) {
-				sessions.pop();
-			}
-		}
-
-		await this.updateSettings({ savedSessions: sessions });
-	}
-
-	/**
-	 * Get saved sessions, optionally filtered by agentId and/or cwd.
-	 *
-	 * Returns sessions sorted by updatedAt (newest first).
-	 *
-	 * @param agentId - Optional filter by agent ID
-	 * @param cwd - Optional filter by working directory
-	 * @returns Array of saved session metadata
-	 */
-	getSavedSessions(agentId?: string, cwd?: string): SavedSessionInfo[] {
-		let sessions = this.state.savedSessions || [];
-
-		if (agentId) {
-			sessions = sessions.filter((s) => s.agentId === agentId);
-		}
-		if (cwd) {
-			sessions = sessions.filter((s) => s.cwd === cwd);
-		}
-
-		// Sort by updatedAt descending (newest first)
-		return [...sessions].sort(
-			(a, b) =>
-				new Date(b.updatedAt).getTime() -
-				new Date(a.updatedAt).getTime(),
-		);
-	}
-
-	/**
-	 * Delete a saved session by sessionId.
-	 *
-	 * Also deletes the associated message history file.
+	 * Delete a session by sessionId.
 	 *
 	 * @param sessionId - ID of session to delete
 	 * @returns Promise that resolves when session is deleted
 	 */
 	async deleteSession(sessionId: string): Promise<void> {
-		// Delete metadata from savedSessions
-		const sessions = (this.state.savedSessions || []).filter(
-			(s) => s.sessionId !== sessionId,
-		);
-		await this.updateSettings({ savedSessions: sessions });
-
-		// Also delete message history file
 		await this.deleteSessionMessages(sessionId);
+	}
+
+	/**
+	 * List sessions derived from per-session message files.
+	 *
+	 * @param agentId - Optional filter by agent ID
+	 * @param cwd - Optional filter by working directory
+	 * @returns Array of session metadata
+	 */
+	async listSessionFiles(
+		agentId?: string,
+		cwd?: string,
+	): Promise<SessionInfo[]> {
+		const adapter = this.plugin.app.vault.adapter;
+		const sessionsDir = this.getSessionsDir();
+		if (!(await adapter.exists(sessionsDir))) {
+			return [];
+		}
+
+		const listResult = await adapter.list(sessionsDir);
+		const sessionFiles = listResult.files.filter((file) =>
+			file.endsWith(".json"),
+		);
+
+		const sessionsById = new Map<string, SessionInfo>();
+
+		for (const filePath of sessionFiles) {
+			const parsed = await this.parseSessionFile(filePath);
+			if (!parsed) {
+				continue;
+			}
+
+			if (agentId && parsed.agentId !== agentId) {
+				continue;
+			}
+
+			if (cwd && parsed.cwd && parsed.cwd !== cwd) {
+				continue;
+			}
+
+			const sessionInfo: SessionInfo = {
+				sessionId: parsed.sessionId,
+				cwd: parsed.cwd ?? cwd ?? "",
+				title: parsed.title,
+				updatedAt: parsed.updatedAt,
+			};
+
+			const existing = sessionsById.get(parsed.sessionId);
+			if (
+				!existing ||
+				this.getTimestamp(parsed.updatedAt) >
+					this.getTimestamp(existing.updatedAt)
+			) {
+				sessionsById.set(parsed.sessionId, sessionInfo);
+			}
+		}
+
+		return Array.from(sessionsById.values()).sort(
+			(a, b) =>
+				this.getTimestamp(b.updatedAt) -
+				this.getTimestamp(a.updatedAt),
+		);
 	}
 
 	// ============================================================
@@ -264,6 +255,85 @@ export class SettingsStore implements ISettingsAccess {
 		return `${this.getSessionsDir()}/${safeId}.json`;
 	}
 
+	private getTimestamp(value?: string): number {
+		if (!value) {
+			return 0;
+		}
+		const parsed = Date.parse(value);
+		return Number.isNaN(parsed) ? 0 : parsed;
+	}
+
+	private extractTitleFromMessages(
+		messages: SessionMessagesFile["messages"],
+	): string | undefined {
+		const firstUserMessage = messages.find((message) => message.role === "user");
+		if (!firstUserMessage) {
+			return undefined;
+		}
+
+		for (const content of firstUserMessage.content) {
+			if (content.type === "text" || content.type === "text_with_context") {
+				const trimmed = content.text.trim();
+				if (!trimmed) {
+					return undefined;
+				}
+				if (trimmed.length > 50) {
+					return `${trimmed.substring(0, 50)}...`;
+				}
+				return trimmed;
+			}
+		}
+
+		return undefined;
+	}
+
+	private async parseSessionFile(filePath: string): Promise<{
+		sessionId: string;
+		agentId: string;
+		cwd?: string;
+		title?: string;
+		updatedAt?: string;
+	} | null> {
+		const adapter = this.plugin.app.vault.adapter;
+
+		try {
+			const content = await adapter.read(filePath);
+			const data = JSON.parse(content) as SessionMessagesFile;
+
+			if (
+				typeof data.version !== "number" ||
+				typeof data.sessionId !== "string" ||
+				typeof data.agentId !== "string" ||
+				!Array.isArray(data.messages)
+			) {
+				return null;
+			}
+
+			if (data.version !== 1) {
+				return null;
+			}
+
+			const updatedAt =
+				data.messages.length > 0
+					? data.messages[data.messages.length - 1].timestamp
+					: data.savedAt;
+
+			return {
+				sessionId: data.sessionId,
+				agentId: data.agentId,
+				cwd: data.cwd,
+				title: this.extractTitleFromMessages(data.messages),
+				updatedAt,
+			};
+		} catch (error) {
+			console.warn(
+				`[SettingsStore] Failed to parse session file ${filePath}:`,
+				error,
+			);
+			return null;
+		}
+	}
+
 	/**
 	 * Save message history for a session.
 	 *
@@ -272,11 +342,13 @@ export class SettingsStore implements ISettingsAccess {
 	 *
 	 * @param sessionId - Session ID
 	 * @param agentId - Agent ID for validation
+	 * @param cwd - Working directory for the session
 	 * @param messages - Chat messages to save
 	 */
 	async saveSessionMessages(
 		sessionId: string,
 		agentId: string,
+		cwd: string,
 		messages: ChatMessage[],
 	): Promise<void> {
 		await this.ensureSessionsDir();
@@ -291,6 +363,7 @@ export class SettingsStore implements ISettingsAccess {
 			version: 1,
 			sessionId,
 			agentId,
+			cwd,
 			messages: serialized,
 			savedAt: new Date().toISOString(),
 		};

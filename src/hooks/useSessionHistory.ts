@@ -95,7 +95,7 @@ export interface UseSessionHistoryReturn {
 	canFork: boolean;
 	/** Whether session/list is supported (unstable) */
 	canList: boolean;
-	/** Whether sessions are from local storage (agent doesn't support list) */
+	/** Whether sessions are from local storage (agent can't list or restore) */
 	isUsingLocalSessions: boolean;
 
 	/**
@@ -129,21 +129,10 @@ export interface UseSessionHistoryReturn {
 	forkSession: (sessionId: string, cwd: string) => Promise<void>;
 
 	/**
-	 * Delete a session (local metadata + message file).
+	 * Delete a session (local message file).
 	 * @param sessionId - Session to delete
 	 */
 	deleteSession: (sessionId: string) => Promise<void>;
-
-	/**
-	 * Save session metadata locally.
-	 * Called when the first message is sent in a new session.
-	 * @param sessionId - Session ID to save
-	 * @param messageContent - First message content (used to generate title)
-	 */
-	saveSessionLocally: (
-		sessionId: string,
-		messageContent: string,
-	) => Promise<void>;
 
 	/**
 	 * Save session messages locally.
@@ -266,23 +255,28 @@ export function useSessionHistory(
 				!capabilities.canList || !canPerformAnyOperation;
 
 			if (shouldUseLocalSessions) {
-				// Get locally saved sessions for this agent
-				const localSessions = settingsAccess.getSavedSessions(
-					session.agentId,
-					cwd,
-				);
-
-				// Convert SavedSessionInfo to SessionInfo format
-				const sessionInfos: SessionInfo[] = localSessions.map((s) => ({
-					sessionId: s.sessionId,
-					cwd: s.cwd,
-					title: s.title,
-					updatedAt: s.updatedAt,
-				}));
-
-				setSessions(sessionInfos);
-				setNextCursor(undefined); // No pagination for local sessions
+				setLoading(true);
 				setError(null);
+
+				try {
+					const sessionInfos = await settingsAccess.listSessionFiles(
+						session.agentId,
+						cwd,
+					);
+
+					setSessions(sessionInfos);
+					setNextCursor(undefined); // No pagination for local sessions
+				} catch (err) {
+					const errorMessage =
+						err instanceof Error ? err.message : String(err);
+					setError(
+						`Failed to fetch local sessions: ${errorMessage}`,
+					);
+					setSessions([]);
+					setNextCursor(undefined);
+				} finally {
+					setLoading(false);
+				}
 				return;
 			}
 
@@ -486,42 +480,14 @@ export function useSessionHistory(
 					onMessagesRestore(localMessages);
 				}
 
-				// Save forked session to history
-				if (session.agentId) {
-					const originalSession = sessions.find(
-						(s) => s.sessionId === sessionId,
-					);
-					const originalTitle = originalSession?.title ?? "Session";
-
-					// Truncate title to 50 characters
-					const maxTitleLength = 50;
-					const prefix = "Fork: ";
-					const maxBaseLength = maxTitleLength - prefix.length;
-					const truncatedTitle =
-						originalTitle.length > maxBaseLength
-							? originalTitle.substring(0, maxBaseLength) + "..."
-							: originalTitle;
-					const newTitle = `${prefix}${truncatedTitle}`;
-
-					const now = new Date().toISOString();
-
-					await settingsAccess.saveSession({
-						sessionId: result.sessionId,
-						agentId: session.agentId,
+				// Save messages under new session ID for restore after restart
+				if (session.agentId && localMessages) {
+					void settingsAccess.saveSessionMessages(
+						result.sessionId,
+						session.agentId,
 						cwd,
-						title: newTitle,
-						createdAt: now,
-						updatedAt: now,
-					});
-
-					// Save messages under new session ID for restore after restart
-					if (localMessages) {
-						void settingsAccess.saveSessionMessages(
-							result.sessionId,
-							session.agentId,
-							localMessages,
-						);
-					}
+						localMessages,
+					);
 				}
 
 				// Invalidate cache since a new session was created
@@ -542,7 +508,6 @@ export function useSessionHistory(
 			onMessagesRestore,
 			invalidateCache,
 			session.agentId,
-			sessions,
 		],
 	);
 
@@ -574,31 +539,6 @@ export function useSessionHistory(
 	);
 
 	/**
-	 * Save session metadata locally.
-	 * Called when the first message is sent in a new session.
-	 */
-	const saveSessionLocally = useCallback(
-		async (sessionId: string, messageContent: string) => {
-			if (!session.agentId) return;
-
-			const title =
-				messageContent.length > 50
-					? messageContent.substring(0, 50) + "..."
-					: messageContent;
-
-			await settingsAccess.saveSession({
-				sessionId,
-				agentId: session.agentId,
-				cwd,
-				title,
-				createdAt: new Date().toISOString(),
-				updatedAt: new Date().toISOString(),
-			});
-		},
-		[session.agentId, cwd, settingsAccess],
-	);
-
-	/**
 	 * Save session messages locally.
 	 * Called when a turn ends (agent response complete).
 	 * Fire-and-forget (does not block UI).
@@ -614,10 +554,11 @@ export function useSessionHistory(
 			void settingsAccess.saveSessionMessages(
 				sessionId,
 				session.agentId,
+				cwd,
 				messages,
 			);
 		},
-		[session.agentId, settingsAccess],
+		[session.agentId, settingsAccess, cwd],
 	);
 
 	return {
@@ -636,7 +577,7 @@ export function useSessionHistory(
 		canRestore: capabilities.canLoad || capabilities.canResume,
 		canFork: capabilities.canFork,
 		canList: capabilities.canList,
-		isUsingLocalSessions: !capabilities.canList,
+		isUsingLocalSessions: !capabilities.canList || !canPerformAnyOperation,
 
 		// Methods
 		fetchSessions,
@@ -644,7 +585,6 @@ export function useSessionHistory(
 		restoreSession,
 		forkSession,
 		deleteSession,
-		saveSessionLocally,
 		saveSessionMessages,
 		invalidateCache,
 	};

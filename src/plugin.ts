@@ -401,8 +401,6 @@ export default class AgentClientPlugin extends Plugin {
 		});
 	}
 
-	onunload() {}
-
 	getOrCreateAdapter(): AcpAdapter {
 		if (!this._acpAdapter) {
 			this._acpAdapter = new AcpAdapter(this);

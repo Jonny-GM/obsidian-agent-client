@@ -135,6 +135,7 @@ export function ChatHeader({
 	const showCancelRetry =
 		isBridgeEnabled && reconnectStatus.state === "scheduled";
 	const showHistory = Boolean(onOpenHistory && hasHistoryCapability);
+	const handleOpenHistory = onOpenHistory ?? (() => {});
 
 	return (
 		<div className="agent-client-chat-view-header">
@@ -186,7 +187,7 @@ export function ChatHeader({
 					<HeaderButton
 						iconName="history"
 						tooltip="Session history"
-						onClick={onOpenHistory}
+						onClick={handleOpenHistory}
 					/>
 				)}
 				<HeaderButton

@@ -548,8 +548,6 @@ function ChatComponent({
 
 	const handleSendMessage = useCallback(
 		async (content: string, images?: ImagePromptContent[]) => {
-			const isFirstMessage = messages.length === 0;
-
 			const waitForSessionReady = (): Promise<string | null> => {
 				if (session.sessionId) {
 					return Promise.resolve(session.sessionId);
@@ -595,17 +593,6 @@ function ChatComponent({
 					autoMention.isDisabled || !settings.autoMentionActiveNote,
 				images,
 			});
-
-			// Save session metadata locally on first message
-			if (isFirstMessage && session.sessionId) {
-				await sessionHistory.saveSessionLocally(
-					session.sessionId,
-					content,
-				);
-				logger.log(
-					`[ChatView] Session saved locally: ${session.sessionId}`,
-				);
-			}
 		},
 		[
 			agentSession,

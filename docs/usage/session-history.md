@@ -32,14 +32,14 @@ Not all actions are available for every agent. The modal shows only the actions 
 
 Sessions are saved automatically when you send messages. The plugin stores:
 
-- **Session metadata**: Title (derived from your first message), timestamps, and working directory
+- **Session metadata**: Derived from the saved message file (title from your first message, timestamps, working directory)
 - **Message history**: Full conversation including agent responses, tool calls, and plans
 
 ### Where Sessions Are Stored
 
 Sessions are saved in two places:
 
-- **Plugin side**: Stored locally in Obsidian's data folder
+- **Plugin side**: Per-session JSON files stored locally in the vault config folder (".obsidian" by default)
 - **Agent side**: Managed by the agent
 
 ## Restore vs Fork
