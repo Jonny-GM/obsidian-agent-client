@@ -41,6 +41,7 @@
 		"@codemirror/state": "6.5.0",
 		"@codemirror/view": "^6.35.0",
 		"diff": "^8.0.2",
+		"fflate": "^0.8.2",
 		"react": "^19.1.1",
 		"react-dom": "^19.1.1",
 		"semver": "^7.7.3"
