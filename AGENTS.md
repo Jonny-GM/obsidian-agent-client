@@ -5,6 +5,14 @@ Obsidian plugin for AI agent interaction (Claude Code, Gemini CLI, custom agents
 
 **Tech**: React 19, TypeScript, Obsidian API, Agent Client Protocol (ACP)
 
+## Branching
+Work on the repo `dev` branch and compare against `upstream/dev`.
+
+## Git Remotes
+Expected repository remotes:
+- `origin`: `https://github.com/Jonny-GM/obsidian-agent-client.git`
+- `upstream`: `https://github.com/RAIT-09/obsidian-agent-client.git`
+
 ## Architecture
 
 ```
@@ -42,12 +50,18 @@ src/
 - **Adapter Instantiation**: Creates AcpAdapter, VaultAdapter, MentionService via useMemo
 - **Rendering**: Delegates to ChatHeader, ChatMessages, ChatInput
 
+### ChatHeader (`components/chat/ChatHeader.tsx`)
+- **Connection Status**: Shows session state + ACP bridge status label
+- **Reconnect Actions**: Displays retry countdown, reconnect, and cancel retry actions
+
 ### Hooks (`hooks/`)
 
 **useAgentSession**: Session lifecycle
 - `createSession()`: Load config, inject API keys, initialize + newSession
 - `switchAgent()`: Change active agent, restart session
 - `closeSession()`: Cancel session, disconnect
+- `reconnectStatus`: Tracks ACP bridge retry schedule + attempts
+- `isBridgeEnabled`: Indicates whether ACP bridge is active for the platform
 
 **useChat**: Messaging
 - `sendMessage()`: Prepare (auto-mention, path conversion) → send via IAgentClient
@@ -66,6 +80,7 @@ src/
 Implements IAgentClient + IAcpClient (terminal ops)
 
 - **Process**: spawn() with login shell (macOS/Linux -l, Windows shell:true)
+- **Bridge**: Optional ACP bridge WebSocket connection with health checks + reconnect
 - **Protocol**: JSON-RPC over stdin/stdout via ndJsonStream
 - **Flow**: initialize() → newSession() → sendMessage() → sessionUpdate() callbacks
 - **Updates**: agent_message_chunk, agent_thought_chunk, tool_call, tool_call_update, plan, available_commands_update
@@ -120,6 +135,9 @@ interface ISettingsAccess {
 2. **Pure functions in shared/**: Non-React business logic
 3. **Ports for ACP resistance**: IAgentClient interface isolates protocol changes
 4. **Domain has zero deps**: No `obsidian`, `@agentclientprotocol/sdk`
+
+### Build Verification
+- Run `npm ci` first to install dependencies, then `npm run build` after documentation or code changes to ensure type checks and bundled output stay in sync.
 
 ### Obsidian Plugin Review (CRITICAL)
 1. No innerHTML/outerHTML - use createEl/createDiv/createSpan
