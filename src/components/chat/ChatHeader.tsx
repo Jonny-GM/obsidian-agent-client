@@ -190,7 +190,7 @@ export function ChatHeader({
 					/>
 				)}
 				<HeaderButton
-					iconName="save"
+					iconName="export"
 					tooltip="Export chat to Markdown"
 					onClick={onExportChat}
 				/>

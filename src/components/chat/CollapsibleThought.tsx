@@ -1,23 +1,52 @@
 import * as React from "react";
-const { useState } = React;
+const { useState, useEffect, useRef } = React;
 import type AgentClientPlugin from "../../plugin";
 import { MarkdownTextRenderer } from "./MarkdownTextRenderer";
 
 interface CollapsibleThoughtProps {
 	text: string;
 	plugin: AgentClientPlugin;
+	isStreaming?: boolean;
+	autoExpand?: boolean;
 }
 
-export function CollapsibleThought({ text, plugin }: CollapsibleThoughtProps) {
-	const [isExpanded, setIsExpanded] = useState(false);
+export function CollapsibleThought({
+	text,
+	plugin,
+	isStreaming = false,
+	autoExpand = false,
+}: CollapsibleThoughtProps) {
+	const [isExpanded, setIsExpanded] = useState(
+		autoExpand && isStreaming,
+	);
+	const hasUserToggled = useRef(false);
+
+	useEffect(() => {
+		if (hasUserToggled.current) {
+			return;
+		}
+		if (autoExpand && isStreaming) {
+			setIsExpanded(true);
+			return;
+		}
+		setIsExpanded(false);
+	}, [autoExpand, isStreaming]);
 
 	return (
 		<div
 			className="agent-client-collapsible-thought"
-			onClick={() => setIsExpanded(!isExpanded)}
+			onClick={() => {
+				hasUserToggled.current = true;
+				setIsExpanded(!isExpanded);
+			}}
 		>
 			<div className="agent-client-collapsible-thought-header">
-				💡Thinking
+				<span>💡 Thinking</span>
+				{isStreaming && (
+					<span className="agent-client-collapsible-thought-live">
+						Live
+					</span>
+				)}
 				<span className="agent-client-collapsible-thought-icon">
 					{isExpanded ? "▼" : "▶"}
 				</span>

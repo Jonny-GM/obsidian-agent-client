@@ -897,6 +897,16 @@ If your plugin does not need CSS, delete this file.
 	gap: 4px;
 }
 
+.agent-client-collapsible-thought-live {
+	font-size: 0.75em;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--text-accent);
+	padding: 2px 6px;
+	border-radius: 999px;
+	border: 1px solid var(--text-accent);
+}
+
 .agent-client-collapsible-thought-icon {
 	font-size: 0.8em;
 	opacity: 0.7;
